@@ -1,0 +1,106 @@
+<header>
+  <div class="brand">🚀 <b>IgniteAds</b><span class="tag">generate → launch → measure</span></div>
+  @if (user()) {
+    <div class="user">
+      <span>{{ user()?.email }}</span>
+      <button class="ghost" (click)="logout()">Sign out</button>
+    </div>
+  }
+</header>
+
+@if (user() === undefined) {
+  <main class="center"><p>Loading…</p></main>
+} @else if (user() === null) {
+  <main class="center hero">
+    <h1>Your AI ads, actually launched.</h1>
+    <p>Pick a generated video → Gemini writes the copy → a real Meta campaign is built, PAUSED and ready. You just say go.</p>
+    <button class="primary big" (click)="login()">Sign in with Google</button>
+  </main>
+} @else {
+  <main>
+    @if (error()) { <div class="alert">{{ error() }} <button class="ghost" (click)="error.set('')">✕</button></div> }
+    @if (busy()) { <div class="busy"><span class="spinner"></span>{{ busy() }}</div> }
+
+    <div class="toolbar">
+      <h2>Campaigns</h2>
+      <div>
+        <button class="ghost" (click)="refresh()">↻ Refresh</button>
+        <button class="primary" (click)="openLaunch()">+ Launch an ad</button>
+      </div>
+    </div>
+
+    @if (showLaunch()) {
+      <section class="card launch-form">
+        <h3>New launch <span class="muted">— publishes PAUSED, no spend until you activate</span></h3>
+        <div class="grid">
+          <label>Video (IgniteAI run)
+            <select [(ngModel)]="selectedRun">
+              <option value="">— pick a completed video —</option>
+              @for (r of runs(); track r.run_id) {
+                <option [value]="r.run_id">{{ r.run_id.slice(0, 12) }}… · {{ r.prompt || 'no prompt' }}</option>
+              }
+            </select>
+          </label>
+          <label>…or any public video URL
+            <input [(ngModel)]="videoUrl" placeholder="https://…/video.mp4" />
+          </label>
+          <label>Landing URL
+            <input [(ngModel)]="landingUrl" />
+          </label>
+          <label>Daily budget (minor units — 10000 = ₹100)
+            <input type="number" [(ngModel)]="budget" />
+          </label>
+        </div>
+        <div class="copy-block">
+          <div class="copy-head">
+            <h4>Ad copy</h4>
+            <button class="ghost" (click)="suggestCopy()">✨ Suggest with Gemini</button>
+          </div>
+          <label>Primary text <textarea rows="2" [(ngModel)]="primaryText"></textarea></label>
+          <div class="grid">
+            <label>Headline <input [(ngModel)]="headline" /></label>
+            <label>Description <input [(ngModel)]="description" /></label>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="ghost" (click)="showLaunch.set(false)">Cancel</button>
+          <button class="primary" (click)="launch()">🚀 Launch (PAUSED)</button>
+        </div>
+      </section>
+    }
+
+    @if (!campaigns().length && !busy()) {
+      <p class="muted center-text">No campaigns yet — launch your first ad above.</p>
+    }
+
+    @for (c of campaigns(); track c.launch_id) {
+      <section class="card row">
+        <video [src]="c.video_url" muted playsinline preload="metadata"></video>
+        <div class="info">
+          <div class="title-line">
+            <b>{{ c.name }}</b>
+            <span [class]="statusClass(c.status)">{{ c.status }}</span>
+            @if (c.review_status) { <span class="muted small">Meta: {{ c.review_status }}</span> }
+          </div>
+          <div class="muted small">{{ c.copy?.headline }} · {{ (c.config?.daily_budget_cents || 0) / 100 }}/day · → {{ c.config?.landing_url }}</div>
+          @if (c.lifetime) {
+            <div class="metrics">
+              <span>{{ c.lifetime.impressions || 0 }} impressions</span>
+              <span>{{ c.lifetime.clicks || 0 }} clicks</span>
+              <span>{{ c.lifetime.spend || 0 }} spend</span>
+            </div>
+          }
+          @if (c.error) { <div class="small error-text">{{ c.error }}</div> }
+        </div>
+        <div class="row-actions">
+          @if (c.platform_ids?.campaign_id) {
+            <a [href]="adsManagerUrl(c)" target="_blank" class="ghost btn-link">Ads Manager ↗</a>
+          }
+          <button class="ghost" (click)="sync(c)">↻ Sync</button>
+          @if (c.status === 'paused') { <button class="primary" (click)="activate(c)">Activate</button> }
+          @if (c.status === 'active') { <button class="warn" (click)="pause(c)">Pause</button> }
+        </div>
+      </section>
+    }
+  </main>
+}

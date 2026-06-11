@@ -15,16 +15,18 @@ app = FastAPI(title="IgniteAds", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:4200").split(","),
+    allow_origins=os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:4200,https://ads.igniteai.in,https://igniteai-ads.web.app",
+    ).split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Phase B:
-# from backend.routers import accounts, campaigns
-# app.include_router(accounts.router, prefix="/api/ads/accounts", tags=["accounts"])
-# app.include_router(campaigns.router, prefix="/api/ads", tags=["campaigns"])
+from backend.routers import campaigns  # noqa: E402
+
+app.include_router(campaigns.router, prefix="/api/ads", tags=["campaigns"])
 
 
 @app.get("/health")
