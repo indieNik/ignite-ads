@@ -51,30 +51,43 @@ def require_env(*names: str) -> None:
         sys.exit(f"❌ Missing in .env: {', '.join(missing)}")
 
 
-def get_platform():
-    require_env("META_ACCESS_TOKEN", "META_AD_ACCOUNT_ID")
+def get_platform(require_account: bool = True):
+    require_env("META_ACCESS_TOKEN", *(["META_AD_ACCOUNT_ID"] if require_account else []))
     return AdsFactory.get_platform(
         "meta",
         access_token=os.getenv("META_ACCESS_TOKEN"),
-        account_id=os.getenv("META_AD_ACCOUNT_ID"),
+        account_id=os.getenv("META_AD_ACCOUNT_ID", ""),
         page_id=os.getenv("META_PAGE_ID"),
     )
 
 
 def cmd_check() -> None:
-    platform = get_platform()
+    """Dry checks — also discovers ad account / page ids when not yet in .env."""
+    platform = get_platform(require_account=False)
     who = platform.whoami()
     print(f"✅ Token OK — user: {who['user'].get('name')} ({who['user'].get('id')})")
-    print("   Accessible ad accounts:")
+    print("   Accessible ad accounts (META_AD_ACCOUNT_ID candidates):")
     for acct in who["ad_accounts"]:
         print(f"     - {acct.get('id')}  {acct.get('name')}  [{acct.get('currency')}]")
-    info = platform.get_account_info()
-    print(f"✅ Target ad account: {info.get('id')} ({info.get('name')}, {info.get('currency')})")
+
+    if os.getenv("META_AD_ACCOUNT_ID"):
+        info = platform.get_account_info()
+        print(f"✅ Target ad account: {info.get('id')} ({info.get('name')}, {info.get('currency')})")
+    else:
+        print("⚠️  META_AD_ACCOUNT_ID not set — pick one from the list above")
+
     if os.getenv("META_PAGE_ID"):
         page = platform.check_page()
         print(f"✅ Page OK: {page.get('name')} ({page.get('id')})")
     else:
-        print("⚠️  META_PAGE_ID not set — required before launching (ads post as a FB Page)")
+        pages = platform.list_pages()
+        if pages:
+            print("⚠️  META_PAGE_ID not set — pages you manage (candidates):")
+            for p in pages:
+                print(f"     - {p.get('id')}  {p.get('name')}")
+        else:
+            print("⚠️  META_PAGE_ID not set and no pages visible to this token "
+                  "(token needs pages_show_list, or create a FB Page first)")
 
 
 def cmd_activate(launch_id: str) -> None:

@@ -40,8 +40,8 @@ class MetaAPIError(Exception):
 
 
 class MetaAdsPlatform(AdsPlatform):
-    def __init__(self, access_token: str, account_id: str, page_id: Optional[str] = None):
-        if not account_id.startswith("act_"):
+    def __init__(self, access_token: str, account_id: str = "", page_id: Optional[str] = None):
+        if account_id and not account_id.startswith("act_"):
             account_id = f"act_{account_id}"
         self.access_token = access_token
         self.account_id = account_id
@@ -79,6 +79,11 @@ class MetaAdsPlatform(AdsPlatform):
         me = self._get("me", params={"fields": "id,name"})
         accounts = self._get("me/adaccounts", params={"fields": "id,name,currency,account_status"})
         return {"user": me, "ad_accounts": accounts.get("data", [])}
+
+    def list_pages(self) -> List[Dict[str, Any]]:
+        """Pages the token's user manages (for finding META_PAGE_ID)."""
+        body = self._get("me/accounts", params={"fields": "id,name"})
+        return body.get("data", [])
 
     def check_page(self) -> Dict[str, Any]:
         if not self.page_id:
