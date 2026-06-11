@@ -37,8 +37,12 @@ class MetricsStore:
             uri = os.getenv("MONGODB_URI")
             if uri:
                 try:
+                    import certifi
                     from pymongo import MongoClient
-                    self._client = MongoClient(uri, serverSelectionTimeoutMS=4000)
+                    # tlsCAFile: macOS/minimal-container Pythons often lack
+                    # system CA certs — Atlas TLS fails without certifi's bundle
+                    self._client = MongoClient(uri, serverSelectionTimeoutMS=4000,
+                                               tlsCAFile=certifi.where())
                     self._client.admin.command("ping")
                     logger.info("MongoDB Atlas analytics store connected")
                 except Exception as e:
