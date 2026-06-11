@@ -22,12 +22,17 @@ Built in a single session from the approved plan (plan copied to `docs/PLAN.md`)
 1. ~~Fill `.env`~~ ✅ All values set. Founder UID `rYiUmqEJs6P182fiUR2Vx7SXaEA3` (Firebase account is niki.thrill@gmail.com — NOT the professional address). `FIREBASE_SERVICE_ACCOUNT_PATH` points (absolute) at IgniteAI's service-account.json.
 2. ~~`--check` dry checks~~ ✅ PASSED. Token OK. Ad accounts visible: act_308400644 (Nikhil Patil), act_278753666454205 (Nik Ads), act_719968544441517 (Tea Tee Store Ad — currently selected in .env). Page: Gitolx (721068071348640). **Account currency is INR → daily_budget_cents is PAISE; Meta's INR minimum daily budget ≈ ₹85+, so use ≥10000 (₹100) for tests, not 100.**
 3. (Optional) sandbox account test — skipped/available, 1 allowed on dev tier
-4. **← IN PROGRESS: first PAUSED launch** (`adl_60737a55f918484f8240e954629262d6`, run `run_bbd287a971114219945b96e990dcb529`, ₹100/day, landing igniteai.in). Video uploaded ✅ (video_id 780954251680077, persisted — resumable). AI copy worked ✅. **Blocked at creative step**: error 200 "Ad account has no access to this Instagram account" — Gitolx page has NO linked IG; Meta requires an IG actor on video creatives even for fb-only placements. Fixes shipped: `ensure_instagram_actor()` (linked IG → PBIA → create PBIA), `is_adset_budget_sharing_enabled: False` on campaigns, Graph call logging. **Founder action needed: regenerate token in Graph API Explorer ADDING `pages_read_engagement`, re-run exchange_token.py, then `--resume --launch-id adl_60737a55f918484f8240e954629262d6`.** (Experiment campaign 120248872999710548 was created + DELETED during debugging.)
+4. ~~First PAUSED launch~~ ✅ **COMPLETE** (`adl_60737a55f918484f8240e954629262d6`, run `run_bbd287a971114219945b96e990dcb529`, ₹100/day, landing igniteai.in). Full chain on act_719968544441517: video 780954251680077 → creative 2089773941964193 → campaign 120248873448810548 → adset 120248873451870548 → ad 120248873454940548. All PAUSED; review_status IN_PROCESS after first sync. Took 3 fixes across 3 resume cycles (see gotcha log) — which also de-facto validated step-resume idempotency (steps correctly skipped on every resume). Founder should eyeball it in Ads Manager.
 5. Idempotency test: kill mid-launch, `--resume --launch-id <id>` → no duplicates
 6. One 24h min-budget activation (`--activate`, typed confirm) → confirm delivery → `--pause`
 7. Update this file + directive with learnings (real Meta errors, timing)
 
-Gotcha log: `executions` queries combining where(user_id)+order_by(created_at) need a composite Firestore index that doesn't exist — filter/sort client-side (see db_service usage).
+Gotcha log:
+- Firestore: ANY where()+order_by() combo needs a composite index the shared project doesn't have — always filter/sort client-side (fixed in `list_ad_launches`).
+- Meta: token from dev console "Get Token" can be blocked by browser extensions (CSP errors) — use Graph API Explorer instead.
+- Meta: video creatives REQUIRE an IG identity even for fb-only placements. Page had no linked IG → use page-backed IG account (PBIA); needs `pages_read_engagement` on the token. **Field is `instagram_user_id` — `instagram_actor_id` is rejected on v23.**
+- Meta: campaigns need `is_adset_budget_sharing_enabled` when budget is on the adset; `video_feeds` FB position is deprecated.
+- Meta: INR account → `daily_budget_cents` = paise; min daily ≈ ₹85+.
 
 ### After Phase A validates
 - Submit Meta App Review (Phase B gate, 2–6 weeks — start early; see docs/PLAN.md)

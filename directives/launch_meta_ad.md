@@ -46,6 +46,9 @@ explicit human confirmation — activate it.
   via `ensure_instagram_actor()` (linked IG → existing PBIA → create PBIA), but
   PBIA creation needs the token to ALSO have `pages_read_engagement` — regenerate
   the token with that permission and re-exchange if you see this error.
+- **Error 100 "Param instagram_actor_id must be a valid Instagram account id"**:
+  v23 rejects the legacy `instagram_actor_id` field — pass the IG/PBIA id as
+  `object_story_spec.instagram_user_id` instead (validated 2026-06-11).
 - **Error 100 "is_adset_budget_sharing_enabled"**: newer Graph versions require
   this field on campaigns when budget lives on the ad set (we send `False`).
 - **`video_feeds` Facebook position is deprecated** — don't request it; default
