@@ -1,0 +1,25 @@
+# Runtime & Environment
+.tmp/
+tmp/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+venv/
+output
+
+# Secrets & Credentials
+service-account.json
+*-sa-key.json
+.config/*
+!.config/*.example
+
+# Generated/Temporary Files
+build/
+dist/
+.cache/
+*.log
+
+# Platform
+.firebase/
+node_modules/

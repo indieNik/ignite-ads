@@ -1,0 +1,13 @@
+# IgniteAds backend — single source of truth for Python deps (IgniteAI convention).
+# Add new deps HERE only; Dockerfile and Cloud Build install from this file.
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+requests
+firebase-admin
+google-cloud-firestore
+google-cloud-tasks
+google-genai
+# Phase B only:
+# cryptography

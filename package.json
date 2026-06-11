@@ -1,0 +1,9 @@
+{
+  "name": "ignite-ads",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Launch AI-generated UGC video ads on Meta & Google Ads",
+  "scripts": {
+    "deploy:backend": "bash scripts/deploy/deploy-backend.sh"
+  }
+}

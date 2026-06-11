@@ -1,0 +1,18 @@
+# Cloud Run env vars for ignite-ads-backend (gitignored as cloud-run-env.yaml).
+# Passed via deploy-backend.sh --env-vars-file. Quote everything.
+META_APP_ID: ""
+META_APP_SECRET: ""
+META_ACCESS_TOKEN: ""
+META_AD_ACCOUNT_ID: ""
+META_PAGE_ID: ""
+META_GRAPH_API_VERSION: "v23.0"
+ADS_MAX_DAILY_BUDGET_CENTS: "50000"
+FOUNDER_USER_ID: ""
+FIREBASE_STORAGE_BUCKET: ""
+GEMINI_API_KEY: ""
+CORS_ORIGINS: "http://localhost:4200"
+# Phase B:
+# ADS_TOKEN_ENC_KEY: ""
+# CLOUD_TASKS_QUEUE: ""
+# CLOUD_RUN_URL: ""
+# CLOUD_TASKS_SA_EMAIL: ""
