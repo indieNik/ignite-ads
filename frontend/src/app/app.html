@@ -1,26 +1,24 @@
 <header>
-  <div class="brand">🚀 <b>IgniteAds</b><span class="tag">generate → launch → measure</span></div>
+  <a class="brand" href="/">🚀 <b>Ignite<span class="grad">Ads</span></b><span class="tag">generate → launch → measure</span></a>
   @if (user()) {
     <div class="user">
-      <span>{{ user()?.email }}</span>
+      <span class="user-chip">{{ user()?.email }}</span>
       <button class="ghost" (click)="logout()">Sign out</button>
     </div>
   }
 </header>
 
 @if (user() === undefined) {
-  <main class="center"><p>Loading…</p></main>
+  <main class="center"><span class="orbit"></span></main>
 } @else if (user() === null) {
   <main class="center hero">
-    <h1>Your AI ads, actually launched.</h1>
-    <p>Pick a generated video → Gemini writes the copy → a real Meta campaign is built, PAUSED and ready. You just say go.</p>
+    <h1>Your AI ads,<br /><em>actually launched.</em></h1>
+    <p>Pick a generated video → Gemini writes the copy → a real Meta campaign is built, <b>paused</b> and ready. You just say go.</p>
     <button class="primary big" (click)="login()">Sign in with Google</button>
+    <a class="back-link" href="/">← About IgniteAds</a>
   </main>
 } @else {
   <main>
-    @if (error()) { <div class="alert">{{ error() }} <button class="ghost" (click)="error.set('')">✕</button></div> }
-    @if (busy()) { <div class="busy"><span class="spinner"></span>{{ busy() }}</div> }
-
     <div class="toolbar">
       <h2>Campaigns</h2>
       <div>
@@ -29,12 +27,28 @@
       </div>
     </div>
 
-    @if (!campaigns().length && !busy()) {
-      <p class="muted center-text">No campaigns yet — launch your first ad above.</p>
+    @if (loading()) {
+      @for (i of [0, 1]; track i) {
+        <section class="card row skeleton">
+          <div class="sk sk-video"></div>
+          <div class="info">
+            <div class="sk sk-line w40"></div>
+            <div class="sk sk-line w70"></div>
+            <div class="sk sk-line w25"></div>
+          </div>
+        </section>
+      }
+    } @else if (!campaigns().length) {
+      <section class="empty">
+        <div class="empty-art">🚀</div>
+        <h3>No campaigns yet</h3>
+        <p>Your first launch is one click away — pick a generated video and let the agent do the Ads Manager work.</p>
+        <button class="primary" (click)="openLaunch()">Launch your first ad</button>
+      </section>
     }
 
-    @for (c of campaigns(); track c.launch_id) {
-      <section class="card row">
+    @for (c of campaigns(); track c.launch_id; let i = $index) {
+      <section class="card row enter" [style.animation-delay.ms]="i * 70">
         <video [src]="c.video_url" muted playsinline preload="metadata"></video>
         <div class="info">
           <div class="title-line">
@@ -47,6 +61,21 @@
             · → {{ c.config?.landing_url }}
             · {{ fmtDate(c.created_at) }}
           </div>
+
+          @if (c.status === 'launching') {
+            <div class="stepper" aria-label="Launch progress">
+              @for (s of steps; track s.key; let si = $index) {
+                <div class="step"
+                     [class.done]="stepDone(c, s.key)"
+                     [class.current]="si === stepCurrent(c)">
+                  <span class="step-dot">@if (stepDone(c, s.key)) {✓}</span>
+                  <span class="step-label">{{ s.label }}</span>
+                </div>
+                @if (si < steps.length - 1) { <span class="step-bar" [class.done]="stepDone(c, steps[si + 1].key) || stepDone(c, s.key)"></span> }
+              }
+            </div>
+          }
+
           @if (c.lifetime) {
             <div class="metrics">
               <span><b>{{ c.lifetime.impressions || 0 }}</b> impressions</span>
@@ -59,22 +88,26 @@
         <div class="row-actions">
           @if (c.status === 'paused') { <button class="primary" (click)="activate(c)">▶ Activate</button> }
           @if (c.status === 'active') { <button class="warn" (click)="pause(c)">⏸ Pause</button> }
+          @if (c.status === 'launching') { <span class="launching-note"><span class="orbit sm"></span> building…</span> }
           <div class="action-links">
             @if (c.platform_ids?.campaign_id) {
               <a [href]="adsManagerUrl(c)" target="_blank" class="link">Ads Manager ↗</a>
             }
-            <button class="link" (click)="sync(c)">↻ Sync</button>
+            <button class="link" (click)="sync(c)" [disabled]="syncingId() === c.launch_id">
+              @if (syncingId() === c.launch_id) { syncing… } @else { ↻ Sync }
+            </button>
           </div>
         </div>
       </section>
     }
   </main>
 
+  <!-- ============ launch modal ============ -->
   @if (showLaunch()) {
     <div class="overlay" (click)="showLaunch.set(false)">
       <section class="modal" (click)="$event.stopPropagation()">
         <h3>New launch</h3>
-        <p class="muted small modal-sub">Publishes PAUSED — no spend until you explicitly activate.</p>
+        <p class="muted small modal-sub">Publishes <b>paused</b> — no spend until you explicitly activate.</p>
 
         <label>Video (completed IgniteAI run)
           <select [(ngModel)]="selectedRun">
@@ -100,7 +133,7 @@
           <h4>Ad copy</h4>
           <button class="gemini" [class.thinking]="suggesting()" [disabled]="suggesting()" (click)="suggestCopy()">
             @if (suggesting()) {
-              <span class="orbit"></span> Gemini is writing…
+              <span class="orbit sm"></span> Gemini is writing…
             } @else {
               ✨ Suggest with Gemini
             }
@@ -118,10 +151,35 @@
         <div class="actions">
           <button class="ghost" (click)="showLaunch.set(false)" [disabled]="launching()">Cancel</button>
           <button class="primary" (click)="launch()" [disabled]="launching() || suggesting()">
-            @if (launching()) { <span class="orbit light"></span> Launching… } @else { 🚀 Launch (PAUSED) }
+            @if (launching()) { <span class="orbit sm light"></span> Launching… } @else { 🚀 Launch (paused) }
           </button>
         </div>
       </section>
     </div>
   }
+
+  <!-- ============ confirm dialog ============ -->
+  @if (confirmState(); as cs) {
+    <div class="overlay" (click)="confirmState.set(null)">
+      <section class="modal confirm" (click)="$event.stopPropagation()">
+        <h3>{{ cs.title }}</h3>
+        <p class="muted">{{ cs.message }}</p>
+        <div class="actions">
+          <button class="ghost" (click)="confirmState.set(null)">Cancel</button>
+          <button class="warn" (click)="cs.onConfirm()">{{ cs.confirmText }}</button>
+        </div>
+      </section>
+    </div>
+  }
 }
+
+<!-- ============ toasts ============ -->
+<div class="toasts" aria-live="polite">
+  @for (t of toasts(); track t.id) {
+    <div class="toast" [class]="'toast ' + t.kind">
+      <span class="toast-icon">@switch (t.kind) { @case ('success') {✓} @case ('error') {!} @default {ⓘ} }</span>
+      <span>{{ t.text }}</span>
+      <button (click)="dismissToast(t.id)">✕</button>
+    </div>
+  }
+</div>

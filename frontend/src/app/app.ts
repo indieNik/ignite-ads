@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, HostListener, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { User } from 'firebase/auth';
 import { apiFetch, login, logout, watchUser } from './firebase';
@@ -25,6 +25,28 @@ interface Run {
   prompt: string;
 }
 
+interface Toast {
+  id: number;
+  kind: 'success' | 'error' | 'info';
+  text: string;
+}
+
+interface ConfirmState {
+  title: string;
+  message: string;
+  confirmText: string;
+  onConfirm: () => void;
+}
+
+/** The Meta launch chain — mirrors the backend's step-resume state machine. */
+const LAUNCH_STEPS: { key: string; label: string }[] = [
+  { key: 'video_id', label: 'Video' },
+  { key: 'creative_id', label: 'Creative' },
+  { key: 'campaign_id', label: 'Campaign' },
+  { key: 'adset_id', label: 'Ad set' },
+  { key: 'ad_id', label: 'Ad' },
+];
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -36,11 +58,15 @@ export class App implements OnInit {
   user = signal<User | null | undefined>(undefined); // undefined = booting
   campaigns = signal<Campaign[]>([]);
   runs = signal<Run[]>([]);
-  busy = signal<string>(''); // current operation label
-  error = signal<string>('');
+  loading = signal(true); // first campaigns fetch → skeletons
+  error = signal<string>(''); // modal-scoped error
   showLaunch = signal(false);
-  suggesting = signal(false); // Gemini copy generation in flight
-  launching = signal(false);  // launch request in flight (modal-scoped)
+  suggesting = signal(false);
+  launching = signal(false);
+  syncingId = signal<string>(''); // per-card sync spinner
+  toasts = signal<Toast[]>([]);
+  confirmState = signal<ConfirmState | null>(null);
+  steps = LAUNCH_STEPS;
 
   // launch form
   selectedRun = '';
@@ -52,6 +78,8 @@ export class App implements OnInit {
   description = '';
   aiGenerated = false;
 
+  private toastSeq = 0;
+
   ngOnInit() {
     watchUser((u) => {
       this.user.set(u);
@@ -59,18 +87,32 @@ export class App implements OnInit {
     });
   }
 
-  login() { login().catch((e) => this.error.set(e.message)); }
+  @HostListener('document:keydown.escape')
+  onEscape() {
+    if (this.confirmState()) this.confirmState.set(null);
+    else if (this.showLaunch() && !this.launching()) this.showLaunch.set(false);
+  }
+
+  login() { login().catch((e) => this.toast('error', e.message)); }
   logout() { logout(); this.campaigns.set([]); }
 
-  async refresh() {
+  toast(kind: Toast['kind'], text: string) {
+    const id = ++this.toastSeq;
+    this.toasts.update((t) => [...t, { id, kind, text }]);
+    setTimeout(() => this.dismissToast(id), 4500);
+  }
+  dismissToast(id: number) {
+    this.toasts.update((t) => t.filter((x) => x.id !== id));
+  }
+
+  async refresh(silent = false) {
     try {
-      this.busy.set('Loading campaigns…');
       const data = await apiFetch('/api/ads/campaigns');
       this.campaigns.set(data.campaigns || []);
     } catch (e: any) {
-      this.error.set(e.message);
+      if (!silent) this.toast('error', e.message);
     } finally {
-      this.busy.set('');
+      this.loading.set(false);
     }
   }
 
@@ -138,6 +180,8 @@ export class App implements OnInit {
         }),
       });
       this.showLaunch.set(false);
+      this.toast('info', 'Launch started — building the chain on Meta. Everything stays paused.');
+      await this.refresh(true);
       this.pollUntilDone(res.launch_id);
     } catch (e: any) {
       this.error.set(e.message);
@@ -146,66 +190,73 @@ export class App implements OnInit {
     }
   }
 
+  /** Poll while launching — the campaign card's stepper lights up live. */
   private async pollUntilDone(launchId: string) {
-    this.busy.set('Launching: video → creative → campaign → ad set → ad…');
-    for (let i = 0; i < 90; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 4000));
       try {
         const launch = await apiFetch(`/api/ads/campaigns/${launchId}`);
-        await this.refresh();
+        await this.refresh(true);
         if (launch.status !== 'launching' && launch.status !== 'draft') {
-          this.busy.set('');
-          if (launch.status === 'error') this.error.set(`Launch failed: ${launch.error}`);
+          if (launch.status === 'error') {
+            this.toast('error', `Launch failed: ${launch.error}`);
+          } else {
+            this.toast('success', `“${launch.copy?.headline || launch.name}” is live in Ads Manager — paused and ready.`);
+          }
           return;
         }
       } catch { /* transient — keep polling */ }
     }
-    this.busy.set('');
   }
 
   async sync(c: Campaign) {
-    this.busy.set('Syncing from Meta…');
+    this.syncingId.set(c.launch_id);
     try {
       await apiFetch(`/api/ads/campaigns/${c.launch_id}/sync`, { method: 'POST' });
-      await this.refresh();
+      await this.refresh(true);
+      this.toast('success', 'Synced with Meta.');
     } catch (e: any) {
-      this.error.set(e.message);
+      this.toast('error', e.message);
     } finally {
-      this.busy.set('');
+      this.syncingId.set('');
     }
   }
 
-  async activate(c: Campaign) {
-    const budget = (c.config?.daily_budget_cents / 100).toFixed(2);
-    if (!confirm(`Start REAL AD SPEND for "${c.name}" at ${budget}/day (account currency)?`)) return;
-    this.busy.set('Activating…');
-    try {
-      await apiFetch(`/api/ads/campaigns/${c.launch_id}/activate`, {
-        method: 'POST', body: JSON.stringify({ confirm: true }),
-      });
-      await this.refresh();
-    } catch (e: any) {
-      this.error.set(e.message);
-    } finally {
-      this.busy.set('');
-    }
+  activate(c: Campaign) {
+    const budget = `${this.currencySymbol(c)}${(c.config?.daily_budget_cents / 100).toFixed(0)}/day`;
+    this.confirmState.set({
+      title: 'Start real ad spend?',
+      message: `“${c.copy?.headline || c.name}” will go live on Meta at ${budget}. You can pause it anytime.`,
+      confirmText: `Activate at ${budget}`,
+      onConfirm: async () => {
+        this.confirmState.set(null);
+        try {
+          await apiFetch(`/api/ads/campaigns/${c.launch_id}/activate`, {
+            method: 'POST', body: JSON.stringify({ confirm: true }),
+          });
+          await this.refresh(true);
+          this.toast('success', 'Campaign activated — delivery starts after Meta finishes review.');
+        } catch (e: any) {
+          this.toast('error', e.message);
+        }
+      },
+    });
   }
 
   async pause(c: Campaign) {
-    this.busy.set('Pausing…');
     try {
       await apiFetch(`/api/ads/campaigns/${c.launch_id}/pause`, { method: 'POST' });
-      await this.refresh();
+      await this.refresh(true);
+      this.toast('success', 'Campaign paused.');
     } catch (e: any) {
-      this.error.set(e.message);
-    } finally {
-      this.busy.set('');
+      this.toast('error', e.message);
     }
   }
 
+  // ---------- view helpers ----------
+
   adsManagerUrl(c: Campaign): string {
-    const campaignId = c.platform_ids?.campaign_id;
-    return `https://adsmanager.facebook.com/adsmanager/manage/campaigns?selected_campaign_ids=${campaignId}`;
+    return `https://adsmanager.facebook.com/adsmanager/manage/campaigns?selected_campaign_ids=${c.platform_ids?.campaign_id}`;
   }
 
   statusClass(s: string): string {
@@ -240,5 +291,14 @@ export class App implements OnInit {
     const date = this.fmtDate(r.created_at);
     const prompt = (r.prompt || '').slice(0, 60) || r.run_id.slice(0, 16);
     return `${date} · ${prompt}`;
+  }
+
+  stepDone(c: Campaign, key: string): boolean {
+    return !!c.platform_ids?.[key];
+  }
+
+  /** Index of the step currently executing (first one without an id). */
+  stepCurrent(c: Campaign): number {
+    return this.steps.findIndex((s) => !c.platform_ids?.[s.key]);
   }
 }
