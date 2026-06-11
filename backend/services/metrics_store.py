@@ -25,15 +25,21 @@ logger = get_logger(__name__)
 DB_NAME = "igniteads"
 
 
+RETRY_INTERVAL_SECS = 60
+
+
 class MetricsStore:
     def __init__(self):
         self._client = None
-        self._checked = False
+        self._last_attempt = 0.0
 
     @property
     def db(self):
-        if not self._checked:
-            self._checked = True
+        # Re-attempt periodically rather than latching off on first failure —
+        # transient causes (Atlas IP allowlist updates, cold networking) heal
+        # without needing an instance restart.
+        if self._client is None and time.time() - self._last_attempt > RETRY_INTERVAL_SECS:
+            self._last_attempt = time.time()
             uri = os.getenv("MONGODB_URI")
             if uri:
                 try:
@@ -41,13 +47,13 @@ class MetricsStore:
                     from pymongo import MongoClient
                     # tlsCAFile: macOS/minimal-container Pythons often lack
                     # system CA certs — Atlas TLS fails without certifi's bundle
-                    self._client = MongoClient(uri, serverSelectionTimeoutMS=4000,
-                                               tlsCAFile=certifi.where())
-                    self._client.admin.command("ping")
+                    client = MongoClient(uri, serverSelectionTimeoutMS=4000,
+                                         tlsCAFile=certifi.where())
+                    client.admin.command("ping")
+                    self._client = client
                     logger.info("MongoDB Atlas analytics store connected")
                 except Exception as e:
                     logger.warning(f"MongoDB unavailable, analytics disabled: {e}")
-                    self._client = None
         return self._client[DB_NAME] if self._client is not None else None
 
     def is_enabled(self) -> bool:
