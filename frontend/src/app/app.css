@@ -82,6 +82,47 @@ input, select, textarea {
   width: 100%; min-width: 0; max-width: 100%;
 }
 .copy-head { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 8px; }
+
+/* Gemini suggest button — animated gradient border while thinking */
+button.gemini {
+  background: transparent; position: relative;
+  border: 1px solid #4a3a8a; color: #c9b8ff;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+button.gemini.thinking {
+  border-color: transparent; color: #e2d9ff;
+  background:
+    linear-gradient(#161624, #161624) padding-box,
+    linear-gradient(120deg, #6d4aff, #ff4ad4, #4ad4ff, #6d4aff) border-box;
+  background-size: 100% 100%, 300% 300%;
+  animation: borderflow 1.6s linear infinite;
+}
+@keyframes borderflow {
+  0% { background-position: 0 0, 0% 50%; }
+  100% { background-position: 0 0, 300% 50%; }
+}
+button:disabled { opacity: 0.75; cursor: progress; }
+
+/* tiny orbiting dot spinner */
+.orbit {
+  width: 13px; height: 13px; border-radius: 50%; position: relative; flex-shrink: 0;
+  border: 2px solid rgba(157, 134, 255, 0.25); display: inline-block;
+}
+.orbit::after {
+  content: ""; position: absolute; top: -2px; left: -2px; width: 13px; height: 13px;
+  border-radius: 50%; border: 2px solid transparent; border-top-color: #b9a3ff;
+  animation: spin 0.7s linear infinite;
+}
+.orbit.light { border-color: rgba(255,255,255,0.3); }
+.orbit.light::after { border-top-color: #fff; }
+
+/* fields shimmer while Gemini writes */
+.shimmer {
+  background: linear-gradient(100deg, #0f0f1a 40%, #1e1b33 50%, #0f0f1a 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 .alert {

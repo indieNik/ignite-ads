@@ -98,18 +98,28 @@
 
         <div class="copy-head">
           <h4>Ad copy</h4>
-          <button class="ghost" (click)="suggestCopy()">✨ Suggest with Gemini</button>
+          <button class="gemini" [class.thinking]="suggesting()" [disabled]="suggesting()" (click)="suggestCopy()">
+            @if (suggesting()) {
+              <span class="orbit"></span> Gemini is writing…
+            } @else {
+              ✨ Suggest with Gemini
+            }
+          </button>
         </div>
-        <label>Primary text <textarea rows="2" [(ngModel)]="primaryText"></textarea></label>
+        <label>Primary text
+          <textarea rows="2" [(ngModel)]="primaryText" [class.shimmer]="suggesting()" [disabled]="suggesting()"></textarea>
+        </label>
         <div class="grid2">
-          <label>Headline <input [(ngModel)]="headline" /></label>
-          <label>Description <input [(ngModel)]="description" /></label>
+          <label>Headline <input [(ngModel)]="headline" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
+          <label>Description <input [(ngModel)]="description" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
         </div>
 
         @if (error()) { <div class="alert">{{ error() }}</div> }
         <div class="actions">
-          <button class="ghost" (click)="showLaunch.set(false)">Cancel</button>
-          <button class="primary" (click)="launch()">🚀 Launch (PAUSED)</button>
+          <button class="ghost" (click)="showLaunch.set(false)" [disabled]="launching()">Cancel</button>
+          <button class="primary" (click)="launch()" [disabled]="launching() || suggesting()">
+            @if (launching()) { <span class="orbit light"></span> Launching… } @else { 🚀 Launch (PAUSED) }
+          </button>
         </div>
       </section>
     </div>

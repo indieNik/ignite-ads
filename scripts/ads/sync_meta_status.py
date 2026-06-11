@@ -81,10 +81,18 @@ def main():
         print(line)
 
         if args.insights:
-            for row in platform.get_insights(ids):
+            insights = platform.get_insights(ids)
+            for row in insights:
                 print(f"    {row.get('date_start')}: {row.get('impressions', 0)} impr, "
                       f"{row.get('clicks', 0)} clicks, ctr={row.get('ctr', '0')}, "
                       f"spend={row.get('spend', '0')}")
+            # Mirror into MongoDB analytics store (agent queries via MCP)
+            from backend.services.metrics_store import metrics_store
+            if metrics_store.is_enabled():
+                fresh = ads_db.get_ad_launch(lid)
+                n = metrics_store.record_daily_metrics(fresh, insights)
+                metrics_store.record_campaign_summary(fresh)
+                print(f"    → {n} daily rows mirrored to MongoDB Atlas")
 
 
 if __name__ == "__main__":

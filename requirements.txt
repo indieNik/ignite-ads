@@ -9,5 +9,6 @@ firebase-admin
 google-cloud-firestore
 google-cloud-tasks
 google-genai
+pymongo
 # Phase B only:
 # cryptography

@@ -67,9 +67,9 @@ This is a real launch engine, not a demo: it has created live (paused) campaigns
 
 | Asset | Link |
 |---|---|
-| **Code** | https://github.com/indieNik/ignite-ads *(flip to public before submitting, or add judges as collaborators)* |
-| **Video** | *(record 3-min demo — script below)* |
-| **Architecture diagram** | Export the Mermaid below to PNG (mermaid.live) and link it (e.g. repo `docs/architecture.png`) |
+| **Code** | https://github.com/indieNik/ignite-ads (public, MIT) |
+| **Video** | https://www.youtube.com/watch?v=3RMfih-jVuk |
+| **Architecture diagram** | https://github.com/indieNik/ignite-ads/blob/main/docs/architecture.png |
 | **Testing access** | https://ads.igniteai.in (Google sign-in) — supply a test Google account in the notes |
 
 ## Architecture diagram (export to PNG)

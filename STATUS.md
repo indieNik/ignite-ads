@@ -3,7 +3,13 @@
 > **Agents: read this first, update it last.** Keep entries terse; newest phase state at top.
 > Full plan: `docs/PLAN.md`. Operating rules: `CLAUDE.md`.
 
-## Current state (2026-06-12) — DEPLOYED TO PRODUCTION
+## Current state (2026-06-12, later) — MongoDB MCP + UI polish
+
+- **MongoDB MCP integration shipped** (Rapid Agent hackathon partner requirement): `backend/services/metrics_store.py` mirrors metrics to Atlas (`igniteads.metrics_daily` + `campaign_summaries`) from both sync paths; `.mcp.json` runs the official mongodb-mcp-server read-only; `directives/analyze_ad_performance.md` is the agent SOP for winner/loser analysis. **Founder action: create free Atlas cluster, paste `MONGODB_URI` into `.env` AND `.config/cloud-run-env.yaml`, redeploy backend.** Code no-ops gracefully without it.
+- UI: launch modal got real loading states (Gemini button gradient-border spinner, field shimmer, typewriter copy reveal, launching state).
+- Repo is PUBLIC (MIT). Rapid Agent hackathon SUBMITTED (video: https://www.youtube.com/watch?v=3RMfih-jVuk). Architecture diagram at docs/architecture.png.
+
+## Earlier (2026-06-12) — DEPLOYED TO PRODUCTION
 
 **Full stack live for hackathon submissions:**
 - **Backend**: https://ignite-ads-backend-928660012632.us-central1.run.app (Cloud Run `ignite-ads-backend` in `instagram-content-bot-479808` — same free-credit project as IgniteAI; Firebase creds passed via `FIREBASE_SERVICE_ACCOUNT_JSON` env, NOT a baked file). Routes: /api/ads/{runs,campaigns,launch,copy-suggest,task/run,campaigns/{id}/{activate,pause,sync}}.
