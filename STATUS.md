@@ -3,7 +3,17 @@
 > **Agents: read this first, update it last.** Keep entries terse; newest phase state at top.
 > Full plan: `docs/PLAN.md`. Operating rules: `CLAUDE.md`.
 
-## Current state (2026-06-11)
+## Current state (2026-06-12) — DEPLOYED TO PRODUCTION
+
+**Full stack live for hackathon submissions:**
+- **Backend**: https://ignite-ads-backend-928660012632.us-central1.run.app (Cloud Run `ignite-ads-backend` in `instagram-content-bot-479808` — same free-credit project as IgniteAI; Firebase creds passed via `FIREBASE_SERVICE_ACCOUNT_JSON` env, NOT a baked file). Routes: /api/ads/{runs,campaigns,launch,copy-suggest,task/run,campaigns/{id}/{activate,pause,sync}}.
+- **Frontend**: https://igniteai-ads.web.app (Firebase Hosting site `igniteai-ads` in `ignite-ai-01`). Angular 20 single-component dashboard: Google sign-in, campaign cards, launch form with Gemini copy-suggest, activate (confirm) / pause / sync. Deploy: `bash scripts/deploy/deploy-frontend.sh`.
+- **Custom domain** ads.igniteai.in: NOT yet connected — founder must add it in Firebase console (Hosting → igniteai-ads → Add custom domain) + DNS record. Domain pre-authorized in Firebase Auth.
+- **Account split gotcha**: gcloud deploys = `thejaggerypoint@gmail.com` (Cloud Run project); firebase deploys = `teatee.store0@gmail.com` (owns ignite-ai-01); app login = `niki.thrill@gmail.com` (founder user). Auth authorized domains updated via Identity Toolkit API + SA.
+- **E2E verified in prod** (custom-token test): auth ✅, campaigns list ✅, 50 runs ✅, Meta sync ✅ — first launch passed Meta review (effective_status PAUSED, was IN_PROCESS).
+- **Devpost docs**: `docs/devpost/STARTUPS_AI_AGENTS_CHALLENGE.md` + `RAPID_AGENT_HACKATHON.md` (read the qualification-gaps section — public repo + LICENSE + partner MCP needed for the consumer one).
+
+## Earlier state (2026-06-11)
 
 **Phase A scaffold COMPLETE — code written, NOT yet run against Meta.**
 Built in a single session from the approved plan (plan copied to `docs/PLAN.md`).

@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "ignite-ai-01"
+  },
+  "targets": {
+    "ignite-ai-01": {
+      "hosting": {
+        "ads": ["igniteai-ads"]
+      }
+    }
+  }
+}
