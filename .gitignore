@@ -17,6 +17,7 @@ service-account.json
 # Generated/Temporary Files
 build/
 dist/
+dist-site/
 .cache/
 *.log
 
