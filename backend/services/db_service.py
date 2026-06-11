@@ -130,13 +130,20 @@ class AdsDB:
     def list_ad_launches(self, user_id: Optional[str] = None,
                          statuses: Optional[List[str]] = None,
                          limit: int = 100) -> List[Dict[str, Any]]:
+        # Sort/secondary-filter client-side: combining where()+order_by() needs
+        # composite indexes the shared project doesn't have (and ad volume is
+        # small enough that this is fine for a long time).
+        from google.cloud.firestore_v1.base_query import FieldFilter
         q = self.db.collection(AD_CAMPAIGNS)
         if user_id:
-            q = q.where("user_id", "==", user_id)
+            q = q.where(filter=FieldFilter("user_id", "==", user_id))
+        elif statuses:
+            q = q.where(filter=FieldFilter("status", "in", statuses))
+        rows = [d.to_dict() for d in q.stream()]
         if statuses:
-            q = q.where("status", "in", statuses)
-        q = q.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit)
-        return [d.to_dict() for d in q.stream()]
+            rows = [r for r in rows if r.get("status") in statuses]
+        rows.sort(key=lambda r: r.get("created_at", 0), reverse=True)
+        return rows[:limit]
 
     def save_metrics_snapshot(self, launch_id: str, date_key: str,
                               metrics: Dict[str, Any]) -> None:

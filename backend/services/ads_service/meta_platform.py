@@ -159,7 +159,9 @@ class MetaAdsPlatform(AdsPlatform):
         # ensure_instagram_actor() resolves/creates a page-backed IG account.
         ig_actor = self.ensure_instagram_actor()
         if ig_actor:
-            story_spec["instagram_actor_id"] = ig_actor
+            # NOTE: instagram_actor_id is rejected on v23+ — instagram_user_id
+            # is the accepted field (PBIA ids work here).
+            story_spec["instagram_user_id"] = ig_actor
         body = self._post(f"{self.account_id}/adcreatives", {
             "name": f"{spec.name} — creative",
             "object_story_spec": story_spec,
