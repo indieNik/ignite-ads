@@ -55,6 +55,20 @@ class ConfirmBody(BaseModel):
     confirm: bool = False
 
 
+def require_launch_access(user: dict = Depends(get_current_user)) -> dict:
+    """Private beta: launching/operating ads is allowlisted. Phase A runs on
+    the founder's Meta ad account via env credentials, so an open /launch
+    would let ANY signed-in Google user create campaigns on that account.
+    Allowlist via ADS_ALLOWED_USER_IDS (comma-separated), default founder."""
+    allowed = os.getenv("ADS_ALLOWED_USER_IDS") or os.getenv("FOUNDER_USER_ID", "")
+    allowed_ids = {uid.strip() for uid in allowed.split(",") if uid.strip()}
+    if user["uid"] not in allowed_ids:
+        raise HTTPException(status_code=403,
+                            detail="IgniteAds is in private beta — launching is not enabled "
+                                   "for this account yet. Reach out via igniteai.in.")
+    return user
+
+
 def _own_launch_or_404(launch_id: str, user_id: str) -> dict:
     launch = ads_db.get_ad_launch(launch_id)
     if not launch or launch.get("user_id") != user_id:
@@ -94,7 +108,7 @@ async def get_campaign(launch_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/copy-suggest")
-async def copy_suggest(req: CopySuggestRequest, user: dict = Depends(get_current_user)):
+async def copy_suggest(req: CopySuggestRequest, user: dict = Depends(require_launch_access)):
     video_script = ""
     if req.run_id:
         run = ads_db.get_execution(req.run_id)
@@ -110,7 +124,7 @@ async def copy_suggest(req: CopySuggestRequest, user: dict = Depends(get_current
 
 @router.post("/launch")
 async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
-                 user: dict = Depends(get_current_user)):
+                 user: dict = Depends(require_launch_access)):
     max_budget = int(os.getenv("ADS_MAX_DAILY_BUDGET_CENTS", "50000"))
     if req.daily_budget_cents > max_budget:
         raise HTTPException(status_code=400,
@@ -191,7 +205,7 @@ async def task_run(body: dict):
 
 @router.post("/campaigns/{launch_id}/activate")
 async def activate(launch_id: str, body: ConfirmBody,
-                   user: dict = Depends(get_current_user)):
+                   user: dict = Depends(require_launch_access)):
     """Start real spend. PAUSED-first contract: requires explicit confirm=true."""
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Set confirm=true to activate (real ad spend)")
@@ -205,7 +219,7 @@ async def activate(launch_id: str, body: ConfirmBody,
 
 
 @router.post("/campaigns/{launch_id}/pause")
-async def pause(launch_id: str, user: dict = Depends(get_current_user)):
+async def pause(launch_id: str, user: dict = Depends(require_launch_access)):
     launch = _own_launch_or_404(launch_id, user["uid"])
     get_founder_platform().set_status(launch["platform_ids"], "PAUSED")
     ads_db.update_ad_launch(launch_id, {"status": "paused"})
@@ -213,7 +227,7 @@ async def pause(launch_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/campaigns/{launch_id}/sync")
-async def sync_status(launch_id: str, user: dict = Depends(get_current_user)):
+async def sync_status(launch_id: str, user: dict = Depends(require_launch_access)):
     """Refresh Meta review/delivery status + last-7d insights."""
     launch = _own_launch_or_404(launch_id, user["uid"])
     ids = launch.get("platform_ids") or {}
