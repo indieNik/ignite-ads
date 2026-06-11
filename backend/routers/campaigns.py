@@ -133,11 +133,24 @@ async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
         account_id=os.getenv("META_AD_ACCOUNT_ID", ""),
         page_id=os.getenv("META_PAGE_ID"),
     )
+    if not account.get("currency"):
+        try:
+            info = get_founder_platform().get_account_info()
+            account = ads_db.upsert_env_ad_account(
+                user["uid"], "meta",
+                account_id=os.getenv("META_AD_ACCOUNT_ID", ""),
+                page_id=os.getenv("META_PAGE_ID"),
+                display_name=info.get("name", ""),
+                currency=info.get("currency", ""),
+            )
+        except Exception as e:
+            logger.warning(f"Could not fetch account currency: {e}")
 
     launch_id = new_launch_id()
     config = {
         "objective": req.objective,
         "daily_budget_cents": req.daily_budget_cents,
+        "currency": account.get("currency", ""),
         "landing_url": req.landing_url,
         "cta_type": req.cta_type,
         "targeting": {"countries": req.countries, "age_min": req.age_min, "age_max": req.age_max},
@@ -148,7 +161,7 @@ async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
         "ad_account_doc_id": account["doc_id"],
         "source_run_id": req.run_id,
         "video_url": video_url,
-        "name": req.name or f"IgniteAds {req.run_id or launch_id}",
+        "name": req.name or f"{req.headline} — IgniteAds",
         "config": config,
         "copy": {"primary_text": req.primary_text, "headline": req.headline,
                  "description": req.description, "ai_generated": req.ai_generated},

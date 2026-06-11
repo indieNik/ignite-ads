@@ -29,46 +29,6 @@
       </div>
     </div>
 
-    @if (showLaunch()) {
-      <section class="card launch-form">
-        <h3>New launch <span class="muted">— publishes PAUSED, no spend until you activate</span></h3>
-        <div class="grid">
-          <label>Video (IgniteAI run)
-            <select [(ngModel)]="selectedRun">
-              <option value="">— pick a completed video —</option>
-              @for (r of runs(); track r.run_id) {
-                <option [value]="r.run_id">{{ r.run_id.slice(0, 12) }}… · {{ r.prompt || 'no prompt' }}</option>
-              }
-            </select>
-          </label>
-          <label>…or any public video URL
-            <input [(ngModel)]="videoUrl" placeholder="https://…/video.mp4" />
-          </label>
-          <label>Landing URL
-            <input [(ngModel)]="landingUrl" />
-          </label>
-          <label>Daily budget (minor units — 10000 = ₹100)
-            <input type="number" [(ngModel)]="budget" />
-          </label>
-        </div>
-        <div class="copy-block">
-          <div class="copy-head">
-            <h4>Ad copy</h4>
-            <button class="ghost" (click)="suggestCopy()">✨ Suggest with Gemini</button>
-          </div>
-          <label>Primary text <textarea rows="2" [(ngModel)]="primaryText"></textarea></label>
-          <div class="grid">
-            <label>Headline <input [(ngModel)]="headline" /></label>
-            <label>Description <input [(ngModel)]="description" /></label>
-          </div>
-        </div>
-        <div class="actions">
-          <button class="ghost" (click)="showLaunch.set(false)">Cancel</button>
-          <button class="primary" (click)="launch()">🚀 Launch (PAUSED)</button>
-        </div>
-      </section>
-    }
-
     @if (!campaigns().length && !busy()) {
       <p class="muted center-text">No campaigns yet — launch your first ad above.</p>
     }
@@ -78,29 +38,80 @@
         <video [src]="c.video_url" muted playsinline preload="metadata"></video>
         <div class="info">
           <div class="title-line">
-            <b>{{ c.name }}</b>
+            <b>{{ c.copy?.headline || c.name }}</b>
             <span [class]="statusClass(c.status)">{{ c.status }}</span>
-            @if (c.review_status) { <span class="muted small">Meta: {{ c.review_status }}</span> }
+            @if (reviewChip(c)) { <span class="badge review">Meta: {{ reviewChip(c) }}</span> }
           </div>
-          <div class="muted small">{{ c.copy?.headline }} · {{ (c.config?.daily_budget_cents || 0) / 100 }}/day · → {{ c.config?.landing_url }}</div>
+          <div class="muted small">
+            {{ currencySymbol(c) }}{{ (c.config?.daily_budget_cents || 0) / 100 }}/day
+            · → {{ c.config?.landing_url }}
+            · {{ fmtDate(c.created_at) }}
+          </div>
           @if (c.lifetime) {
             <div class="metrics">
-              <span>{{ c.lifetime.impressions || 0 }} impressions</span>
-              <span>{{ c.lifetime.clicks || 0 }} clicks</span>
-              <span>{{ c.lifetime.spend || 0 }} spend</span>
+              <span><b>{{ c.lifetime.impressions || 0 }}</b> impressions</span>
+              <span><b>{{ c.lifetime.clicks || 0 }}</b> clicks</span>
+              <span><b>{{ currencySymbol(c) }}{{ c.lifetime.spend || 0 }}</b> spent</span>
             </div>
           }
           @if (c.error) { <div class="small error-text">{{ c.error }}</div> }
         </div>
         <div class="row-actions">
-          @if (c.platform_ids?.campaign_id) {
-            <a [href]="adsManagerUrl(c)" target="_blank" class="ghost btn-link">Ads Manager ↗</a>
-          }
-          <button class="ghost" (click)="sync(c)">↻ Sync</button>
-          @if (c.status === 'paused') { <button class="primary" (click)="activate(c)">Activate</button> }
-          @if (c.status === 'active') { <button class="warn" (click)="pause(c)">Pause</button> }
+          @if (c.status === 'paused') { <button class="primary" (click)="activate(c)">▶ Activate</button> }
+          @if (c.status === 'active') { <button class="warn" (click)="pause(c)">⏸ Pause</button> }
+          <div class="action-links">
+            @if (c.platform_ids?.campaign_id) {
+              <a [href]="adsManagerUrl(c)" target="_blank" class="link">Ads Manager ↗</a>
+            }
+            <button class="link" (click)="sync(c)">↻ Sync</button>
+          </div>
         </div>
       </section>
     }
   </main>
+
+  @if (showLaunch()) {
+    <div class="overlay" (click)="showLaunch.set(false)">
+      <section class="modal" (click)="$event.stopPropagation()">
+        <h3>New launch</h3>
+        <p class="muted small modal-sub">Publishes PAUSED — no spend until you explicitly activate.</p>
+
+        <label>Video (completed IgniteAI run)
+          <select [(ngModel)]="selectedRun">
+            <option value="">— pick a video —</option>
+            @for (r of runs(); track r.run_id) {
+              <option [value]="r.run_id">{{ runLabel(r) }}</option>
+            }
+          </select>
+        </label>
+        <label>…or any public video URL
+          <input [(ngModel)]="videoUrl" placeholder="https://…/video.mp4" />
+        </label>
+        <div class="grid2">
+          <label>Landing URL
+            <input [(ngModel)]="landingUrl" />
+          </label>
+          <label>Daily budget <span class="hint">(minor units — 10000 = ₹100)</span>
+            <input type="number" [(ngModel)]="budget" />
+          </label>
+        </div>
+
+        <div class="copy-head">
+          <h4>Ad copy</h4>
+          <button class="ghost" (click)="suggestCopy()">✨ Suggest with Gemini</button>
+        </div>
+        <label>Primary text <textarea rows="2" [(ngModel)]="primaryText"></textarea></label>
+        <div class="grid2">
+          <label>Headline <input [(ngModel)]="headline" /></label>
+          <label>Description <input [(ngModel)]="description" /></label>
+        </div>
+
+        @if (error()) { <div class="alert">{{ error() }}</div> }
+        <div class="actions">
+          <button class="ghost" (click)="showLaunch.set(false)">Cancel</button>
+          <button class="primary" (click)="launch()">🚀 Launch (PAUSED)</button>
+        </div>
+      </section>
+    </div>
+  }
 }

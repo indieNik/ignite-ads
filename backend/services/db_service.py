@@ -56,10 +56,13 @@ class AdsDB:
             "page_id": page_id,
             "token": {"type": "env", "ref": "META_ACCESS_TOKEN"},
             "status": "connected",
-            "display_name": display_name,
-            "currency": currency,
             "updated_at": time.time(),
         }
+        # only set when known — don't blank out previously-fetched values
+        if display_name:
+            data["display_name"] = display_name
+        if currency:
+            data["currency"] = currency
         ref = self.db.collection(AD_ACCOUNTS).document(doc_id)
         if not ref.get().exists:
             data["connected_at"] = time.time()

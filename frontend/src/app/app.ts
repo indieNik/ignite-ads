@@ -198,4 +198,30 @@ export class App implements OnInit {
     };
     return map[s] || 'badge';
   }
+
+  /** Only surface Meta's status when it adds information beyond ours. */
+  reviewChip(c: Campaign): string {
+    const r = (c.review_status || '').toUpperCase();
+    if (!r || r === 'UNKNOWN') return '';
+    const redundant: Record<string, string> = {
+      paused: 'PAUSED', active: 'ACTIVE', rejected: 'DISAPPROVED',
+    };
+    return redundant[c.status] === r ? '' : r.replace(/_/g, ' ');
+  }
+
+  currencySymbol(c: Campaign): string {
+    const map: Record<string, string> = { INR: '₹', USD: '$', EUR: '€', GBP: '£' };
+    return map[c.config?.currency] ?? '';
+  }
+
+  fmtDate(ts: number): string {
+    if (!ts) return '';
+    return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  runLabel(r: Run): string {
+    const date = this.fmtDate(r.created_at);
+    const prompt = (r.prompt || '').slice(0, 60) || r.run_id.slice(0, 16);
+    return `${date} · ${prompt}`;
+  }
 }
