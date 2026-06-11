@@ -3,7 +3,14 @@
 > **Agents: read this first, update it last.** Keep entries terse; newest phase state at top.
 > Full plan: `docs/PLAN.md`. Operating rules: `CLAUDE.md`.
 
-## Current state (2026-06-12, later) — MongoDB MCP + UI polish
+## Current state (2026-06-12, final) — MongoDB pipeline VERIFIED in prod
+
+- Atlas connected from local (certifi CA fix, PR #7) AND from prod Cloud Run (after founder added 0.0.0.0/0 to the Atlas IP Access List — Cloud Run egress is dynamic; the TLSV1_ALERT_INTERNAL_ERROR signature = IP not allowlisted). Connection retry every 60s instead of latch-off (PR #8).
+- MCP server validated end-to-end: mongodb-mcp-server 1.12.0, 16 tools, real `aggregate` on `campaign_summaries` over stdio JSON-RPC.
+- Prod verification: POST /sync on deployed backend → Atlas `campaign_summaries.updated_at` advanced. `metrics_daily` stays empty until a campaign is activated (zero spend = zero insights rows — correct).
+- Atlas: org "Nikhil's Org", Project 0, Cluster0 (free tier). `MONGODB_URI` in `.env` + `.config/cloud-run-env.yaml` (both gitignored).
+
+## Earlier (2026-06-12) — MongoDB MCP + UI polish
 
 - **MongoDB MCP integration shipped** (Rapid Agent hackathon partner requirement): `backend/services/metrics_store.py` mirrors metrics to Atlas (`igniteads.metrics_daily` + `campaign_summaries`) from both sync paths; `.mcp.json` runs the official mongodb-mcp-server read-only; `directives/analyze_ad_performance.md` is the agent SOP for winner/loser analysis. **Founder action: create free Atlas cluster, paste `MONGODB_URI` into `.env` AND `.config/cloud-run-env.yaml`, redeploy backend.** Code no-ops gracefully without it.
 - UI: launch modal got real loading states (Gemini button gradient-border spinner, field shimmer, typewriter copy reveal, launching state).
