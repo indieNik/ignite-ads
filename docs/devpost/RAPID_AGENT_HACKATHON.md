@@ -70,20 +70,20 @@ gemini, google-cloud-run, cloud-firestore, google-cloud-tasks, firebase-auth, fi
 
 ---
 
-## ⚠️ Qualification gaps & fastest fixes
+## ✅ Qualification status (updated post-submission)
 
-1. **Public open-source repo with license** — repo is currently **private** and has **no LICENSE**.
-   Fix (2 min): add MIT or Apache-2.0 `LICENSE` file, then `gh repo edit indieNik/ignite-ads --visibility public`. ⚠️ Verify no secrets in git history first (we kept `.env`/`.config` gitignored from commit zero, so history is clean — but eyeball `git log --stat` before flipping).
-2. **Partner MCP server integration** — this hackathon's prize buckets require a *meaningful* integration with ONE partner: Arize, Elastic, Fivetran, GitLab, **MongoDB**, Dynatrace.
-   **Recommendation: MongoDB.** Smallest honest integration that's genuinely useful: store ad-performance metric snapshots in MongoDB Atlas and let the agent query/aggregate them through the **MongoDB MCP server** (winner/loser analysis across campaigns — the input to our creative-iteration loop). Estimated: a free Atlas cluster + ~1 hour of agent-side wiring. Pick the **MongoDB bucket** on the submit form if we do this; otherwise this submission risks disqualification on the "Partner Power" requirement.
-3. **~3 minute demo video** — required; record once, reuse for both challenges.
-4. **Google Cloud Agent Builder** is named in "How to Build" — our build is Gemini-on-Cloud-Run rather than Agent Builder low-code. The requirements say "powered by Gemini and Google Cloud" — we qualify via Gemini + GCP stack, but if time permits, mentioning an ADK/Agent Builder wrapper in "What's next" softens this.
+1. **Public open-source repo with license** — ✅ DONE. https://github.com/indieNik/ignite-ads is public, MIT licensed. History verified clean of secrets before flipping.
+2. **Partner MCP server integration: MongoDB** — ✅ IMPLEMENTED.
+   - Ad-performance metrics are mirrored to **MongoDB Atlas** (`igniteads` db: `metrics_daily` + `campaign_summaries`) by both sync paths (`backend/services/metrics_store.py`).
+   - The agent queries/aggregates them through the official **MongoDB MCP server** (`.mcp.json`, read-only) for winner/loser classification and creative-iteration briefs — see `directives/analyze_ad_performance.md`. This is the "analyze" step of the closed loop: generate → launch → measure → **analyze (MongoDB MCP)** → iterate.
+   - Division of labor is deliberate: Firestore = operational state machine; MongoDB = the analytics layer the agent reasons over via MCP.
+3. **~3 minute demo video** — ✅ SUBMITTED: https://www.youtube.com/watch?v=3RMfih-jVuk
+4. **Architecture diagram** — `docs/architecture.png`
 
 ## Submit-form checklist
-- [ ] Track/bucket: **MongoDB** (if integration done) — else pick closest and disclose
-- [ ] Hosted project URL: https://ads.igniteai.in
-- [ ] Public repo URL with LICENSE visible in About
-- [ ] Video URL (YouTube, ≤3 min)
-- [ ] Thumbnail: use a frame of the ad preview grid (5MB max, 3:2)
-- [ ] Image gallery: Ads Manager screenshot (paused campaign), advanced-preview grid, architecture diagram
+- [x] Hosted project URL: https://ads.igniteai.in
+- [x] Public repo URL with MIT LICENSE
+- [x] Video URL: https://www.youtube.com/watch?v=3RMfih-jVuk
+- [x] MongoDB partner integration in repo (post-deadline hardening: metrics mirror + MCP analysis directive)
+- [ ] Image gallery (if still editable): Ads Manager screenshot, advanced-preview grid, docs/architecture.png
 ```

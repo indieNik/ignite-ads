@@ -39,6 +39,8 @@ export class App implements OnInit {
   busy = signal<string>(''); // current operation label
   error = signal<string>('');
   showLaunch = signal(false);
+  suggesting = signal(false); // Gemini copy generation in flight
+  launching = signal(false);  // launch request in flight (modal-scoped)
 
   // launch form
   selectedRun = '';
@@ -84,29 +86,43 @@ export class App implements OnInit {
   }
 
   async suggestCopy() {
-    this.busy.set('Asking Gemini for copy…');
+    this.suggesting.set(true);
     this.error.set('');
+    this.primaryText = '';
+    this.headline = '';
+    this.description = '';
     try {
       const copy = await apiFetch('/api/ads/copy-suggest', {
         method: 'POST',
         body: JSON.stringify({ run_id: this.selectedRun || null, landing_url: this.landingUrl }),
       });
-      this.primaryText = copy.primary_text;
-      this.headline = copy.headline;
-      this.description = copy.description;
+      await this.typewrite('primaryText', copy.primary_text);
+      await this.typewrite('headline', copy.headline);
+      await this.typewrite('description', copy.description);
       this.aiGenerated = true;
     } catch (e: any) {
       this.error.set(e.message);
     } finally {
-      this.busy.set('');
+      this.suggesting.set(false);
     }
+  }
+
+  /** Reveal AI copy character-by-character — feedback that something was generated. */
+  private async typewrite(field: 'primaryText' | 'headline' | 'description', text: string) {
+    const t = text || '';
+    const step = Math.max(1, Math.round(t.length / 30));
+    for (let i = 0; i <= t.length; i += step) {
+      (this as any)[field] = t.slice(0, i);
+      await new Promise((r) => setTimeout(r, 16));
+    }
+    (this as any)[field] = t;
   }
 
   async launch() {
     this.error.set('');
     if (!this.selectedRun && !this.videoUrl) { this.error.set('Pick a video or paste a URL'); return; }
     if (!this.primaryText || !this.headline) { this.error.set('Copy required — use ✨ Suggest or type it'); return; }
-    this.busy.set('Launching (PAUSED)…');
+    this.launching.set(true);
     try {
       const res = await apiFetch('/api/ads/launch', {
         method: 'POST',
@@ -125,7 +141,8 @@ export class App implements OnInit {
       this.pollUntilDone(res.launch_id);
     } catch (e: any) {
       this.error.set(e.message);
-      this.busy.set('');
+    } finally {
+      this.launching.set(false);
     }
   }
 

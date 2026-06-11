@@ -234,4 +234,11 @@ async def sync_status(launch_id: str, user: dict = Depends(get_current_user)):
             "spend": round(total("spend"), 2),
         }
     ads_db.update_ad_launch(launch_id, updates)
-    return ads_db.get_ad_launch(launch_id)
+    launch = ads_db.get_ad_launch(launch_id)
+
+    # Mirror into the MongoDB analytics store (agent queries it via MCP)
+    from backend.services.metrics_store import metrics_store
+    if metrics_store.is_enabled():
+        metrics_store.record_daily_metrics(launch, insights)
+        metrics_store.record_campaign_summary(launch)
+    return launch
