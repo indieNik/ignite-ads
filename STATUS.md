@@ -3,7 +3,16 @@
 > **Agents: read this first, update it last.** Keep entries terse; newest phase state at top.
 > Full plan: `docs/PLAN.md`. Operating rules: `CLAUDE.md`.
 
-## Current state (2026-06-12, final) — MongoDB pipeline VERIFIED in prod
+## Current state (2026-06-12, night) — LANDING PAGE LIVE + private-beta gate
+
+- **Landing at https://ads.igniteai.in/** (PR #11): static hand-crafted page in `landing/` — Three.js GPU particle stream hero, GSAP ScrollTrigger narrative (char-rise headline, scroll-lit 5-step pipeline, Gemini typewriter mock, tilt cards, magnetic CTAs), embedded real demo video. Honest copy only (Meta today, private beta, paused-first). Mobile + reduced-motion safe.
+- **Dashboard moved to /app** (`ng build --base-href /app/`; firebase.json rewrites `/app/**`; `deploy-frontend.sh` assembles `dist-site/` = landing + app).
+- **Security: launch allowlist** — `require_launch_access` (env `ADS_ALLOWED_USER_IDS`, default founder) gates copy-suggest/launch/activate/pause/sync. Before this, ANY signed-in Google user could create campaigns on the founder's Meta account. Reads (/campaigns, /runs) stay per-user.
+- Gotchas: `background-clip:text` doesn't survive per-char child spans in Chromium (animate gradient lines as one masked block); git push of >1MB payloads needs `http.postBuffer` bump; ScrollTrigger reveals don't fire under ultra-fast synthetic scroll (QA artifact, not a bug — verify with ~real-paced scroll).
+- Demo recorder for landing QA: `scripts/demo/shoot_landing.py`.
+- NEXT: premium-UX pass on the app (design tokens shared with landing, page transitions, toasts, launch stepper, skeletons, metric sparklines, empty states).
+
+## Earlier (2026-06-12, final) — MongoDB pipeline VERIFIED in prod
 
 - Atlas connected from local (certifi CA fix, PR #7) AND from prod Cloud Run (after founder added 0.0.0.0/0 to the Atlas IP Access List — Cloud Run egress is dynamic; the TLSV1_ALERT_INTERNAL_ERROR signature = IP not allowlisted). Connection retry every 60s instead of latch-off (PR #8).
 - MCP server validated end-to-end: mongodb-mcp-server 1.12.0, 16 tools, real `aggregate` on `campaign_summaries` over stdio JSON-RPC.
