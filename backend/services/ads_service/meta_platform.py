@@ -54,6 +54,12 @@ class MetaAdsPlatform(AdsPlatform):
         params = dict(params or {})
         params["access_token"] = self.access_token
         url = f"{GRAPH_BASE}/{path.lstrip('/')}"
+        # Every Graph call is logged so launches are never a black box
+        detail = ""
+        if data:
+            keys = [k for k in data.keys() if k not in ("access_token",)]
+            detail = f" body_keys={keys}"
+        logger.info(f"Graph API → {method} /{path.lstrip('/')}{detail}")
         resp = requests.request(method, url, params=params, json=data, timeout=120)
         try:
             body = resp.json()
@@ -62,8 +68,12 @@ class MetaAdsPlatform(AdsPlatform):
             raise MetaAPIError(None, f"Non-JSON response: {resp.text[:200]}")
         if "error" in body:
             err = body["error"]
+            logger.warning(f"Graph API ✗ {method} /{path.lstrip('/')} → "
+                           f"code={err.get('code')}: {err.get('message', '')[:160]}")
             raise MetaAPIError(err.get("code"), err.get("message", "unknown"),
                                err.get("error_user_msg", ""))
+        if "id" in body:
+            logger.info(f"Graph API ✓ {method} /{path.lstrip('/')} → id={body['id']}")
         return body
 
     def _get(self, path: str, params: Optional[Dict] = None) -> Dict[str, Any]:
@@ -142,12 +152,53 @@ class MetaAdsPlatform(AdsPlatform):
                 "value": {"link": spec.config.landing_url},
             },
         }
+        story_spec: Dict[str, Any] = {"page_id": spec.page_id or self.page_id,
+                                      "video_data": video_data}
+        # Without an IG identity Meta rejects the creative ("Ad account has no
+        # access to this Instagram account") even for fb-only placements.
+        # ensure_instagram_actor() resolves/creates a page-backed IG account.
+        ig_actor = self.ensure_instagram_actor()
+        if ig_actor:
+            story_spec["instagram_actor_id"] = ig_actor
         body = self._post(f"{self.account_id}/adcreatives", {
             "name": f"{spec.name} — creative",
-            "object_story_spec": {"page_id": spec.page_id or self.page_id,
-                                  "video_data": video_data},
+            "object_story_spec": story_spec,
         })
         return body["id"]
+
+    def ensure_instagram_actor(self) -> Optional[str]:
+        """Resolve an Instagram identity for ads from this Page.
+
+        Order: page's linked IG business account → existing page-backed IG
+        account (PBIA) → create a PBIA. PBIA ops need a page access token with
+        pages_read_engagement; returns None if unavailable (creative may then
+        fail — surface the permission fix to the operator)."""
+        page_id = self.page_id
+        try:
+            page = self._get(page_id, params={"fields": "instagram_business_account,connected_instagram_account"})
+            linked = (page.get("instagram_business_account") or page.get("connected_instagram_account") or {})
+            if linked.get("id"):
+                return linked["id"]
+        except MetaAPIError:
+            pass
+
+        try:
+            pages = self._get("me/accounts", params={"fields": "id,access_token"})
+            page_token = next((pg.get("access_token") for pg in pages.get("data", [])
+                               if pg["id"] == page_id), None)
+            if not page_token:
+                return None
+            page_client = MetaAdsPlatform(page_token, self.account_id, page_id)
+            pbia = page_client._get(f"{page_id}/page_backed_instagram_accounts")
+            existing = pbia.get("data", [])
+            if existing:
+                return existing[0]["id"]
+            created = page_client._post(f"{page_id}/page_backed_instagram_accounts", {})
+            return created.get("id")
+        except MetaAPIError as e:
+            logger.warning(f"Could not resolve/create page-backed IG account: {e} — "
+                           "token likely needs pages_read_engagement")
+            return None
 
     def create_campaign(self, spec: LaunchSpec) -> str:
         body = self._post(f"{self.account_id}/campaigns", {
@@ -155,6 +206,8 @@ class MetaAdsPlatform(AdsPlatform):
             "objective": spec.config.objective,
             "status": "PAUSED",
             "special_ad_categories": [],
+            # Required on newer Graph versions when budget lives on the ad set
+            "is_adset_budget_sharing_enabled": False,
         })
         return body["id"]
 

@@ -40,6 +40,17 @@ explicit human confirmation — activate it.
 
 ## Edge cases & learnings
 
+- **Error 200 "Ad account has no access to this Instagram account"** (at creative
+  step): the Page has no usable Instagram identity. Meta validates an IG actor on
+  video creatives even for Facebook-only placements. Fix: the client auto-resolves
+  via `ensure_instagram_actor()` (linked IG → existing PBIA → create PBIA), but
+  PBIA creation needs the token to ALSO have `pages_read_engagement` — regenerate
+  the token with that permission and re-exchange if you see this error.
+- **Error 100 "is_adset_budget_sharing_enabled"**: newer Graph versions require
+  this field on campaigns when budget lives on the ad set (we send `False`).
+- **`video_feeds` Facebook position is deprecated** — don't request it; default
+  (Advantage+) placements are fine once an IG actor exists.
+
 - **Interrupted launch** (network error, ^C): the launch doc keeps per-step
   `platform_ids`. Resume with `--resume --launch-id <LAUNCH_ID>` — completed
   steps are skipped, nothing is duplicated. Never start a fresh launch for the
