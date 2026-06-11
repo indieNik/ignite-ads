@@ -18,14 +18,17 @@ Built in a single session from the approved plan (plan copied to `docs/PLAN.md`)
 - [x] All modules py_compile-verified; CLI --help smoke-tested
 - [x] git repo initialized, pushed to GitHub (`indieNik/ignite-ads`, private)
 
-### Next (Phase A verification ladder — needs founder credentials)
-1. Fill `.env`: `META_APP_ID`, `META_APP_SECRET` (dev console → App settings → Basic, app "My Insta Manager" id 2140108452878655), short-lived token from Marketing API → Tools → Get Token → run `python scripts/ads/exchange_token.py --token <T>` → paste `META_ACCESS_TOKEN`. Set `META_AD_ACCOUNT_ID`, `META_PAGE_ID`, Firebase creds (same values as IgniteAI `.env`), `GEMINI_API_KEY`.
-2. `python scripts/ads/launch_meta_ad.py --check` (token/account/page dry checks)
-3. Optional: sandbox account test (create in dev console → set `META_AD_ACCOUNT_ID` to sandbox id)
-4. Real PAUSED launch at minimal budget: `--run-id <completed IgniteAI run> --daily-budget-cents 100 --landing-url <URL> --ai-copy` → verify in Ads Manager
+### Verification ladder progress (2026-06-11)
+1. ~~Fill `.env`~~ ✅ All values set. Founder UID `rYiUmqEJs6P182fiUR2Vx7SXaEA3` (Firebase account is niki.thrill@gmail.com — NOT the professional address). `FIREBASE_SERVICE_ACCOUNT_PATH` points (absolute) at IgniteAI's service-account.json.
+2. ~~`--check` dry checks~~ ✅ PASSED. Token OK. Ad accounts visible: act_308400644 (Nikhil Patil), act_278753666454205 (Nik Ads), act_719968544441517 (Tea Tee Store Ad — currently selected in .env). Page: Gitolx (721068071348640). **Account currency is INR → daily_budget_cents is PAISE; Meta's INR minimum daily budget ≈ ₹85+, so use ≥10000 (₹100) for tests, not 100.**
+3. (Optional) sandbox account test — skipped/available, 1 allowed on dev tier
+4. **← NEXT: first real PAUSED launch.** Founder has 115 completed runs; latest: `run_bbd287a971114219945b96e990dcb529` (2026-06-07). Awaiting founder's choice of run + landing URL, then:
+   `python scripts/ads/launch_meta_ad.py --run-id <RUN> --daily-budget-cents 10000 --landing-url <URL> --ai-copy` → verify in Ads Manager
 5. Idempotency test: kill mid-launch, `--resume --launch-id <id>` → no duplicates
 6. One 24h min-budget activation (`--activate`, typed confirm) → confirm delivery → `--pause`
 7. Update this file + directive with learnings (real Meta errors, timing)
+
+Gotcha log: `executions` queries combining where(user_id)+order_by(created_at) need a composite Firestore index that doesn't exist — filter/sort client-side (see db_service usage).
 
 ### After Phase A validates
 - Submit Meta App Review (Phase B gate, 2–6 weeks — start early; see docs/PLAN.md)
