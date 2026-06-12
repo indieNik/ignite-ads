@@ -173,7 +173,7 @@
         </div>
         @if (numVariants > 1) {
           <div class="vtabs" role="tablist">
-            @for (v of variants; track $index) {
+            @for (v of shownVariants(); track $index) {
               <button class="vtab" role="tab" [class.on]="activeVariant === $index"
                       (click)="activeVariant = $index">
                 v{{ $index + 1 }}@if (v.headline) {<span class="vtab-hint"> · {{ v.headline.slice(0, 18) }}</span>}
