@@ -3,7 +3,17 @@
 > **Agents: read this first, update it last.** Keep entries terse; newest phase state at top.
 > Full plan: `docs/PLAN.md`. Operating rules: `CLAUDE.md`.
 
-## Current state (2026-06-12, night) — LANDING PAGE LIVE + private-beta gate
+## Current state (2026-06-13) — A/B COPY VARIANTS + AUTOMATED METRICS LOOP
+
+- **A/B variants shipped + deployed** (PR #14): one video → up to 3 ads with different Gemini copy in ONE adset/budget. `platform_ids` uses indexed keys (`creative_id_0..2`/`ad_id_0..2`); singular `ad_id`/`creative_id` are legacy aliases = variant 0; ALL read paths go through `get_ad_entries()`/`get_copy_variants()` (base.py) — no migration. Gemini returns N distinct angles in one call; UI has variant tabs + per-variant CTR rows with Top badge.
+- **Idempotency kill-test PASSED** (verification-ladder step 5 ✅): 3-variant launch `adl_0b2bca6c8d4a48eca2b4f356387aefdf` killed after ad v1, `--resume` skipped all 6 done steps, created only missing 3 objects. All 3 ads approved+PAUSED on act_719968544441517 (campaign 120248930842100548) — founder can eyeball/delete.
+- **Metrics loop (PR 2)**: `backend/services/sync_service.py` is THE sync path (route + `/task/sync-all` + CLI all call it); campaign docs now keep a 30-day `daily` array (powers card sparkline); insights fetched adset-level (`level=ad`, one call for all variants); Mongo `metrics_daily` keyed (launch_id, date, ad_id) + `variant_index` (collection was empty — no double-count).
+- **Security fix**: `/task/run` was UNAUTHENTICATED (docstring lied). Now gated with `/task/sync-all` by `require_task_auth` (`X-Task-Auth` == env `ADS_TASK_AUTH_TOKEN`, constant-time; open+warning when unset). Cloud Tasks enqueue + Cloud Scheduler send the header. **Founder/deploy action: ADS_TASK_AUTH_TOKEN must be in `.config/cloud-run-env.yaml` at deploy.**
+- **Scheduler**: `scripts/deploy/setup-scheduler.sh` (idempotent) creates job `ignite-ads-metrics-sync` — every 6h IST → POST /task/sync-all.
+- **Pricing**: still charges 0 by decision; `docs/UNIT_COSTS.md` has the COGS analysis (launch ≈ $0.01 worst case, sync <$0.001, fixed ≈ $0/mo) → pricing can be value-based; founder leans usage-credits or flat tier, NOT % of spend.
+- Gotcha: local syncs silently skip the Mongo mirror if `pymongo` isn't installed for the interpreter (metrics_store no-ops by design) — `pip3 install pymongo` locally; prod has it via requirements.txt.
+
+## Earlier (2026-06-12, night) — LANDING PAGE LIVE + private-beta gate
 
 - **Landing at https://ads.igniteai.in/** (PR #11): static hand-crafted page in `landing/` — Three.js GPU particle stream hero, GSAP ScrollTrigger narrative (char-rise headline, scroll-lit 5-step pipeline, Gemini typewriter mock, tilt cards, magnetic CTAs), embedded real demo video. Honest copy only (Meta today, private beta, paused-first). Mobile + reduced-motion safe.
 - **Dashboard moved to /app** (`ng build --base-href /app/`; firebase.json rewrites `/app/**`; `deploy-frontend.sh` assembles `dist-site/` = landing + app).

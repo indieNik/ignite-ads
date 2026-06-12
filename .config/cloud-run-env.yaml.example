@@ -8,6 +8,8 @@ META_PAGE_ID: ""
 META_GRAPH_API_VERSION: "v23.0"
 ADS_MAX_DAILY_BUDGET_CENTS: "50000"
 FOUNDER_USER_ID: ""
+# Shared secret for /task/run + /task/sync-all (Cloud Scheduler / Cloud Tasks)
+ADS_TASK_AUTH_TOKEN: ""
 FIREBASE_STORAGE_BUCKET: ""
 GEMINI_API_KEY: ""
 CORS_ORIGINS: "http://localhost:4200"

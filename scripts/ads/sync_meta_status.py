@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Refresh Meta review/delivery status for launches (Phase C precursor).
+Refresh Meta review/delivery status + metrics for launches.
+
+Thin CLI over backend.services.sync_service.sync_launch — the same code path
+the API route and the Cloud Scheduler task use.
 
     python scripts/ads/sync_meta_status.py                # all non-terminal launches
     python scripts/ads/sync_meta_status.py --launch-id adl_xxx
-    python scripts/ads/sync_meta_status.py --insights     # also print last-7d metrics
+    python scripts/ads/sync_meta_status.py --insights     # also print per-day metrics
 """
 import argparse
 import os
@@ -18,24 +21,13 @@ load_dotenv(os.path.join(ROOT, ".env"))
 
 from backend.services.ads_service import AdsFactory, get_ad_entries  # noqa: E402
 from backend.services.db_service import ads_db  # noqa: E402
-
-# Meta effective_status → our launch status (only transitions we act on)
-STATUS_MAP = {
-    "ACTIVE": "active",
-    "PAUSED": "paused",
-    "CAMPAIGN_PAUSED": "paused",
-    "ADSET_PAUSED": "paused",
-    "DISAPPROVED": "rejected",
-    "WITH_ISSUES": "rejected",
-    "ARCHIVED": "archived",
-    "DELETED": "archived",
-}
+from backend.services.sync_service import sync_launch  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--launch-id")
-    parser.add_argument("--insights", action="store_true", help="Also fetch last-7d insights")
+    parser.add_argument("--insights", action="store_true", help="Also print per-day + per-variant metrics")
     args = parser.parse_args()
 
     platform = AdsFactory.get_platform(
@@ -57,49 +49,25 @@ def main():
 
     for launch in launches:
         lid = launch["launch_id"]
-        ids = launch.get("platform_ids") or {}
-        entries = get_ad_entries(ids)
-        if not entries:
+        if not get_ad_entries(launch.get("platform_ids") or {}):
             print(f"{lid}: not fully launched (status={launch['status']}), skipping")
             continue
 
-        meta_status = platform.get_status(ids)
-        effective = meta_status.get("effective_status", "UNKNOWN")
-        review_feedback = meta_status.get("ad_review_feedback")
+        fresh = sync_launch(launch, platform=platform)
 
-        updates = {"review_status": effective}
-        mapped = STATUS_MAP.get(effective)
-        # Don't overwrite a deliberate local pause/activate with PENDING_REVIEW etc.
-        if mapped and mapped != launch["status"]:
-            updates["status"] = mapped
-        if review_feedback:
-            updates["error"] = str(review_feedback)
-        ads_db.update_ad_launch(lid, updates)
-
-        line = f"{lid}: {launch['status']} → effective_status={effective}"
-        if len(entries) > 1:
-            per_ad = meta_status.get("ads") or []
+        line = f"{lid}: {launch['status']} → effective_status={fresh.get('review_status')}"
+        per_ad = fresh.get("ads") or []
+        if len(per_ad) > 1:
             line += " [" + ", ".join(f"v{a['index'] + 1}={a['effective_status']}" for a in per_ad) + "]"
-        if review_feedback:
-            line += f"  ⚠️ feedback: {review_feedback}"
         print(line)
 
         if args.insights:
-            index_by_ad = {e["ad_id"]: e["index"] for e in entries}
-            insights = platform.get_insights(ids)
-            for row in insights:
-                variant = (f" v{index_by_ad[row['ad_id']] + 1}"
-                           if len(entries) > 1 and row.get("ad_id") in index_by_ad else "")
-                print(f"    {row.get('date_start')}{variant}: {row.get('impressions', 0)} impr, "
-                      f"{row.get('clicks', 0)} clicks, ctr={row.get('ctr', '0')}, "
-                      f"spend={row.get('spend', '0')}")
-            # Mirror into MongoDB analytics store (agent queries via MCP)
-            from backend.services.metrics_store import metrics_store
-            if metrics_store.is_enabled():
-                fresh = ads_db.get_ad_launch(lid)
-                n = metrics_store.record_daily_metrics(fresh, insights)
-                metrics_store.record_campaign_summary(fresh)
-                print(f"    → {n} daily rows mirrored to MongoDB Atlas")
+            for day in fresh.get("daily") or []:
+                print(f"    {day['date']}: {day['impressions']} impr, "
+                      f"{day['clicks']} clicks, spend={day['spend']}")
+            for m in fresh.get("variant_metrics") or []:
+                print(f"    v{m['index'] + 1} \"{m['headline']}\": {m['impressions']} impr, "
+                      f"{m['clicks']} clicks, ctr={m['ctr']}%, spend={m['spend']}")
 
 
 if __name__ == "__main__":

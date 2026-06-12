@@ -56,11 +56,17 @@ def enqueue_launch(launch_id: str, user_id: str) -> bool:
         client = tasks_v2.CloudTasksClient()
         payload = json.dumps({"launch_id": launch_id, "user_id": user_id}).encode()
 
+        headers = {"Content-Type": "application/json"}
+        # /task/run is gated by require_task_auth — present the shared token
+        task_token = os.getenv("ADS_TASK_AUTH_TOKEN")
+        if task_token:
+            headers["X-Task-Auth"] = task_token
+
         task: Dict[str, Any] = {
             "http_request": {
                 "http_method": tasks_v2.HttpMethod.POST,
                 "url": f"{CLOUD_RUN_URL.rstrip('/')}/api/ads/task/run",
-                "headers": {"Content-Type": "application/json"},
+                "headers": headers,
                 "body": payload,
             },
             "dispatch_deadline": duration_pb2.Duration(seconds=TASK_DEADLINE_SECONDS),

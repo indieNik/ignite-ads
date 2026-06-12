@@ -15,14 +15,20 @@ environment.
 
 ## Data model (db: `igniteads`)
 
-- `metrics_daily` — one doc per (launch_id, date): impressions, clicks, ctr,
-  spend, headline, user_id, synced_at
+- `metrics_daily` — one doc per **(launch_id, date, ad_id)**: impressions,
+  clicks, ctr, spend, `variant_index`, per-variant `headline`, user_id,
+  synced_at. One launch can carry up to 3 ads (A/B copy variants) — group by
+  `launch_id` for campaign totals, by `ad_id`/`variant_index` to compare
+  copy angles within a campaign.
 - `campaign_summaries` — one doc per launch: lifetime impressions/clicks/spend,
   status, review_status, headline, primary_text, budget, landing_url,
-  source_run_id
+  source_run_id, `num_variants`, `variant_metrics` (per-variant lifetime
+  impressions/clicks/spend/ctr with headlines — the in-campaign A/B verdict).
 
-Data freshness: docs are written on every `/api/ads/campaigns/{id}/sync` and
-`scripts/ads/sync_meta_status.py --insights` run. Sync first if data is stale.
+Data freshness: docs are written on every `/api/ads/campaigns/{id}/sync`,
+`scripts/ads/sync_meta_status.py` run, and **automatically every 6 hours** by
+the Cloud Scheduler job `ignite-ads-metrics-sync` → `POST /api/ads/task/sync-all`
+(gated by `X-Task-Auth`). Manual sync is only needed for up-to-the-minute data.
 
 ## Procedure
 
@@ -32,11 +38,17 @@ Data freshness: docs are written on every `/api/ads/campaigns/{id}/sync` and
      ignore campaigns with `impressions < 500` (not enough signal).
    - **Winners**: top quartile CTR AND CPC below the account median.
    - **Losers**: bottom quartile CTR with spend > 0, or `review_status` DISAPPROVED.
-3. For each winner, propose 2–3 iteration briefs: same product + landing URL,
+3. **Within multi-variant campaigns** (`num_variants > 1`): compare
+   `variant_metrics` CTRs — the winning copy angle is a stronger iteration
+   signal than cross-campaign comparisons (same video, same audience, same
+   budget; only the copy differs). Require ≥100 impressions per variant
+   before trusting the comparison.
+4. For each winner, propose 2–3 iteration briefs: same product + landing URL,
    new hook angles derived from the winning `headline`/`primary_text` (use the
    `source_run_id` to pull the original video script from IgniteAI's
-   `executions` for context).
-4. Present the briefs to the founder. On approval, feed each brief into
+   `executions` for context). Prefer relaunching as a 3-variant A/B test
+   (`--num-variants 3`).
+5. Present the briefs to the founder. On approval, feed each brief into
    IgniteAI generation, then launch the new variant via
    `directives/launch_meta_ad.md` (PAUSED-first as always).
 

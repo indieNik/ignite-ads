@@ -24,6 +24,10 @@ explicit human confirmation — activate it.
    `python scripts/ads/launch_meta_ad.py --run-id <RUN_ID> --daily-budget-cents <N> --landing-url <URL> --ai-copy`
    - `--ai-copy` prints a Gemini suggestion and asks for confirmation; pass
      `--primary-text/--headline` instead for manual copy.
+   - **A/B test**: add `--num-variants {2,3}` (with `--ai-copy`) — one video
+     becomes N ads with different copy inside ONE adset sharing ONE budget.
+     For a fair test scale the budget ≈ ₹100 × variants; Meta auto-favors one
+     ad early at thin budgets.
    - Use `--video-url` instead of `--run-id` for non-IgniteAI creatives.
 3. **Verify in Ads Manager** (the script prints a direct link):
    - Campaign, ad set, and ad all exist and are PAUSED
@@ -58,6 +62,12 @@ explicit human confirmation — activate it.
   `platform_ids`. Resume with `--resume --launch-id <LAUNCH_ID>` — completed
   steps are skipped, nothing is duplicated. Never start a fresh launch for the
   same intent without checking `ad_campaigns` for an existing doc first.
+  (Validated 2026-06-12 with a 3-variant launch killed after ad v1: resume
+  skipped all 6 completed steps and created only the missing objects.)
+- **Multi-variant platform_ids**: indexed keys `creative_id_0..2`/`ad_id_0..2`;
+  the singular `ad_id`/`creative_id` on a doc are legacy aliases = variant 0.
+  Read code goes through `get_ad_entries()`/`get_copy_variants()` in
+  `backend/services/ads_service/base.py` — never parse the dict by hand.
 - **Video processing timeout**: Meta processes the uploaded video async; the
   script polls up to 5 min. Large/4K files can exceed this — just `--resume`.
 - **Error 400 with OAuth code 190**: token expired → re-run the token exchange.
