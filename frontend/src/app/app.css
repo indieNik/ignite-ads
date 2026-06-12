@@ -105,6 +105,23 @@ button.big { font-size: 15.5px; padding: 13px 30px; }
 .step-bar { width: 18px; height: 1.5px; background: var(--line); border-radius: 2px; transition: background 0.4s; }
 .step-bar.done { background: var(--brand); }
 
+/* ============ A/B variant board (campaign card) ============ */
+.variant-board { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.variant-row {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: var(--dim);
+  padding: 5px 10px; border: 1px solid transparent; border-radius: 9px;
+}
+.variant-row.top { border-color: #2c4d33; background: rgba(30, 92, 58, 0.12); }
+.v-tag {
+  font-size: 10px; font-weight: 700; color: #9d86ff;
+  border: 1px solid #4a3a8a; border-radius: 6px; padding: 1px 6px; flex-shrink: 0;
+}
+.v-headline { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-stat { flex-shrink: 0; }
+.v-stat b { color: var(--text); }
+.badge.v-top-badge { background: #1d5c3a; color: #7ee2a8; text-transform: none; }
+
 /* ============ skeletons ============ */
 .sk { background: linear-gradient(100deg, #15152400 30%, #1e1b33 50%, #15152400 70%) , var(--bg); background-size: 200% 100%, auto; animation: shimmer 1.3s linear infinite; border-radius: 8px; }
 .sk-video { width: 76px; height: 134px; border-radius: 12px; flex-shrink: 0; }
@@ -151,8 +168,34 @@ input, select, textarea {
   transition: border-color 0.2s;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); }
-.copy-head { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 8px; }
+.copy-head { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 8px; flex-wrap: wrap; gap: 8px; }
 .copy-head h4 { font-family: var(--font-display); }
+.copy-tools { display: flex; align-items: center; gap: 10px; }
+
+/* variant count segmented control */
+.seg {
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--line); border-radius: 100px; padding: 3px 4px 3px 11px;
+  background: var(--bg);
+}
+.seg-label { font-size: 11px; color: var(--dimmer); margin-right: 5px; }
+.seg-btn {
+  border: none; background: transparent; color: var(--dim);
+  padding: 3px 9px; border-radius: 100px; font-size: 12px;
+}
+.seg-btn.on { background: var(--brand); color: #fff; }
+.seg-btn:hover:not(:disabled):not(.on) { background: var(--bg-soft); transform: none; }
+
+/* variant tabs in the launch modal */
+.vtabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.vtab {
+  border: 1px solid var(--line); background: var(--bg); color: var(--dim);
+  padding: 5px 12px; border-radius: 9px; font-size: 12px; font-weight: 500;
+  max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.vtab.on { border-color: var(--brand); color: var(--text); background: rgba(109, 74, 255, 0.12); }
+.vtab-hint { color: var(--dimmer); font-weight: 400; }
+.variant-note { color: var(--dimmer); margin: -2px 0 10px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 /* Gemini suggest button — animated gradient border while thinking */

@@ -4,6 +4,16 @@ import { FormsModule } from '@angular/forms';
 import { User } from 'firebase/auth';
 import { apiFetch, login, logout, watchUser } from './firebase';
 
+interface VariantMetric {
+  index: number;
+  ad_id: string;
+  headline: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  ctr: number;
+}
+
 interface Campaign {
   launch_id: string;
   name: string;
@@ -12,10 +22,20 @@ interface Campaign {
   video_url: string;
   config: any;
   copy: any;
+  copy_variants?: any[];
+  num_variants?: number;
   platform_ids: any;
   lifetime?: { impressions?: number; clicks?: number; spend?: number };
+  variant_metrics?: VariantMetric[];
+  ads?: { index: number; ad_id: string; effective_status: string; headline: string }[];
   created_at: number;
   error?: string;
+}
+
+interface VariantForm {
+  primaryText: string;
+  headline: string;
+  description: string;
 }
 
 interface Run {
@@ -38,14 +58,8 @@ interface ConfirmState {
   onConfirm: () => void;
 }
 
-/** The Meta launch chain — mirrors the backend's step-resume state machine. */
-const LAUNCH_STEPS: { key: string; label: string }[] = [
-  { key: 'video_id', label: 'Video' },
-  { key: 'creative_id', label: 'Creative' },
-  { key: 'campaign_id', label: 'Campaign' },
-  { key: 'adset_id', label: 'Ad set' },
-  { key: 'ad_id', label: 'Ad' },
-];
+/** Minimum impressions before crowning an A/B winner — below this it's noise. */
+const TOP_VARIANT_MIN_IMPRESSIONS = 100;
 
 @Component({
   selector: 'app-root',
@@ -66,16 +80,15 @@ export class App implements OnInit {
   syncingId = signal<string>(''); // per-card sync spinner
   toasts = signal<Toast[]>([]);
   confirmState = signal<ConfirmState | null>(null);
-  steps = LAUNCH_STEPS;
 
   // launch form
   selectedRun = '';
   videoUrl = '';
   landingUrl = 'https://igniteai.in';
   budget = 10000; // minor units (₹100.00 on INR accounts)
-  primaryText = '';
-  headline = '';
-  description = '';
+  numVariants = 1; // A/B test: one ad per copy variant, same video + adset
+  activeVariant = 0;
+  variants: VariantForm[] = [this.emptyVariant()];
   aiGenerated = false;
 
   private toastSeq = 0;
@@ -127,20 +140,39 @@ export class App implements OnInit {
     }
   }
 
+  emptyVariant(): VariantForm {
+    return { primaryText: '', headline: '', description: '' };
+  }
+
+  setNumVariants(n: number) {
+    this.numVariants = n;
+    while (this.variants.length < n) this.variants.push(this.emptyVariant());
+    this.variants.length = n;
+    if (this.activeVariant >= n) this.activeVariant = n - 1;
+  }
+
   async suggestCopy() {
     this.suggesting.set(true);
     this.error.set('');
-    this.primaryText = '';
-    this.headline = '';
-    this.description = '';
+    this.variants = Array.from({ length: this.numVariants }, () => this.emptyVariant());
+    this.activeVariant = 0;
     try {
-      const copy = await apiFetch('/api/ads/copy-suggest', {
+      const res = await apiFetch('/api/ads/copy-suggest', {
         method: 'POST',
-        body: JSON.stringify({ run_id: this.selectedRun || null, landing_url: this.landingUrl }),
+        body: JSON.stringify({
+          run_id: this.selectedRun || null,
+          landing_url: this.landingUrl,
+          num_variants: this.numVariants,
+        }),
       });
-      await this.typewrite('primaryText', copy.primary_text);
-      await this.typewrite('headline', copy.headline);
-      await this.typewrite('description', copy.description);
+      const suggestions = res.variants || [res];
+      for (let i = 0; i < this.numVariants && i < suggestions.length; i++) {
+        this.activeVariant = i; // typewrite into the visible tab
+        await this.typewrite(i, 'primaryText', suggestions[i].primary_text);
+        await this.typewrite(i, 'headline', suggestions[i].headline);
+        await this.typewrite(i, 'description', suggestions[i].description);
+      }
+      this.activeVariant = 0;
       this.aiGenerated = true;
     } catch (e: any) {
       this.error.set(e.message);
@@ -150,20 +182,27 @@ export class App implements OnInit {
   }
 
   /** Reveal AI copy character-by-character — feedback that something was generated. */
-  private async typewrite(field: 'primaryText' | 'headline' | 'description', text: string) {
+  private async typewrite(vi: number, field: keyof VariantForm, text: string) {
     const t = text || '';
     const step = Math.max(1, Math.round(t.length / 30));
     for (let i = 0; i <= t.length; i += step) {
-      (this as any)[field] = t.slice(0, i);
+      this.variants[vi][field] = t.slice(0, i);
       await new Promise((r) => setTimeout(r, 16));
     }
-    (this as any)[field] = t;
+    this.variants[vi][field] = t;
   }
 
   async launch() {
     this.error.set('');
     if (!this.selectedRun && !this.videoUrl) { this.error.set('Pick a video or paste a URL'); return; }
-    if (!this.primaryText || !this.headline) { this.error.set('Copy required — use ✨ Suggest or type it'); return; }
+    const incomplete = this.variants.findIndex((v) => !v.primaryText || !v.headline);
+    if (incomplete >= 0) {
+      this.activeVariant = incomplete;
+      this.error.set(this.numVariants > 1
+        ? `Variant ${incomplete + 1} needs copy — use ✨ Suggest or type it`
+        : 'Copy required — use ✨ Suggest or type it');
+      return;
+    }
     this.launching.set(true);
     try {
       const res = await apiFetch('/api/ads/launch', {
@@ -173,9 +212,9 @@ export class App implements OnInit {
           video_url: this.videoUrl || null,
           daily_budget_cents: this.budget,
           landing_url: this.landingUrl,
-          primary_text: this.primaryText,
-          headline: this.headline,
-          description: this.description,
+          variants: this.variants.map((v) => ({
+            primary_text: v.primaryText, headline: v.headline, description: v.description,
+          })),
           ai_generated: this.aiGenerated,
         }),
       });
@@ -293,12 +332,41 @@ export class App implements OnInit {
     return `${date} · ${prompt}`;
   }
 
+  /** The Meta launch chain for this campaign — mirrors the backend's
+   * step-resume state machine, one creative+ad pair per copy variant. */
+  stepsFor(c: Campaign): { key: string; label: string }[] {
+    const n = c.num_variants || 1;
+    const steps = [
+      { key: 'video_id', label: 'Video' },
+      { key: 'campaign_id', label: 'Campaign' },
+      { key: 'adset_id', label: 'Ad set' },
+    ];
+    for (let i = 0; i < n; i++) {
+      const v = n > 1 ? ` v${i + 1}` : '';
+      steps.push({ key: `creative_id_${i}`, label: `Creative${v}` });
+      steps.push({ key: `ad_id_${i}`, label: `Ad${v}` });
+    }
+    return steps;
+  }
+
   stepDone(c: Campaign, key: string): boolean {
-    return !!c.platform_ids?.[key];
+    if (c.platform_ids?.[key]) return true;
+    // pre-variant docs persisted singular creative_id/ad_id
+    if (key === 'creative_id_0') return !!c.platform_ids?.creative_id;
+    if (key === 'ad_id_0') return !!c.platform_ids?.ad_id;
+    return false;
   }
 
   /** Index of the step currently executing (first one without an id). */
   stepCurrent(c: Campaign): number {
-    return this.steps.findIndex((s) => !c.platform_ids?.[s.key]);
+    return this.stepsFor(c).findIndex((s) => !this.stepDone(c, s.key));
+  }
+
+  /** Winning variant index by CTR — only once it has enough impressions. */
+  topVariant(c: Campaign): number {
+    const eligible = (c.variant_metrics || [])
+      .filter((m) => (m.impressions || 0) >= TOP_VARIANT_MIN_IMPRESSIONS && m.ctr > 0);
+    if ((c.variant_metrics?.length || 0) < 2 || !eligible.length) return -1;
+    return eligible.reduce((a, b) => (b.ctr > a.ctr ? b : a)).index;
   }
 }

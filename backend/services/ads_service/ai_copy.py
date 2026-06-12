@@ -4,13 +4,15 @@ from the source video's script and the user's brand kit.
 
 Uses Gemini via google-genai with JSON output. Copy is always a *suggestion*:
 the CLI (Phase A) prints it for review and the launch wizard (Phase B) makes
-it editable before launch.
+it editable before launch. One call can return up to MAX_COPY_VARIANTS
+distinct variants — the unit of an A/B test (one ad per variant).
 """
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.logger import get_logger
+from backend.services.ads_service.base import MAX_COPY_VARIANTS
 
 logger = get_logger(__name__)
 
@@ -25,18 +27,28 @@ Hard rules (Meta ad policy):
 - Headline: <=40 chars, benefit-led.
 - Description: <=30 chars, optional reinforcement.
 
-Return STRICT JSON: {"primary_text": str, "headline": str, "description": str}"""
+You will be asked for a specific number of variants. Each variant must take a
+clearly different angle — e.g. curiosity hook vs. direct benefit vs. social
+proof/urgency. Different primary_text AND headline, never paraphrases of each other.
+
+Return STRICT JSON:
+{"variants": [{"primary_text": str, "headline": str, "description": str}, ...]}
+with EXACTLY the number of variants requested."""
 
 
-def generate_ad_copy(
+def generate_ad_copy_variants(
     video_script: str,
     landing_url: str,
     brand: Optional[Dict[str, Any]] = None,
     product_hint: str = "",
-) -> Dict[str, str]:
-    """Returns {primary_text, headline, description}. Raises on LLM failure —
-    callers fall back to manual copy."""
+    num_variants: int = 1,
+) -> List[Dict[str, str]]:
+    """Returns num_variants dicts of {primary_text, headline, description}.
+    Raises on LLM failure — callers fall back to manual copy."""
     from google import genai
+
+    if not 1 <= num_variants <= MAX_COPY_VARIANTS:
+        raise ValueError(f"num_variants must be 1-{MAX_COPY_VARIANTS}, got {num_variants}")
 
     brand_block = ""
     if brand:
@@ -48,7 +60,7 @@ def generate_ad_copy(
         f"{brand_block}\n"
         f"Product hint: {product_hint or '(none)'}\n"
         f"Landing page: {landing_url}\n\n"
-        "Write the ad copy JSON now."
+        f"Write exactly {num_variants} ad copy variant(s) now."
     )
 
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
@@ -62,8 +74,24 @@ def generate_ad_copy(
         },
     )
     data = json.loads(response.text)
-    for key in ("primary_text", "headline", "description"):
-        if key not in data:
-            raise ValueError(f"AI copy missing '{key}': {data}")
-    logger.info("AI ad copy generated", extra={"data": {"headline": data["headline"]}})
-    return {k: data[k] for k in ("primary_text", "headline", "description")}
+    variants = data.get("variants")
+    if not isinstance(variants, list) or len(variants) != num_variants:
+        raise ValueError(f"AI copy returned {len(variants) if isinstance(variants, list) else 'no'} "
+                         f"variants, expected {num_variants}: {data}")
+    for v in variants:
+        for key in ("primary_text", "headline", "description"):
+            if key not in v:
+                raise ValueError(f"AI copy variant missing '{key}': {v}")
+    logger.info("AI ad copy generated",
+                extra={"data": {"headlines": [v["headline"] for v in variants]}})
+    return [{k: v[k] for k in ("primary_text", "headline", "description")} for v in variants]
+
+
+def generate_ad_copy(
+    video_script: str,
+    landing_url: str,
+    brand: Optional[Dict[str, Any]] = None,
+    product_hint: str = "",
+) -> Dict[str, str]:
+    """Single-variant convenience wrapper (legacy callers)."""
+    return generate_ad_copy_variants(video_script, landing_url, brand, product_hint, 1)[0]

@@ -8,7 +8,8 @@ import time
 from typing import Any, Dict
 
 from backend.logger import get_logger
-from backend.services.ads_service.base import AdCopy, LaunchConfig, LaunchSpec
+from backend.services.ads_service.base import (AdCopy, LaunchConfig, LaunchSpec,
+                                                get_copy_variants)
 from backend.services.ads_service.factory import AdsFactory
 from backend.services.db_service import ads_db
 
@@ -38,18 +39,23 @@ def run_launch(launch_id: str) -> Dict[str, Any]:
         video_url=launch["video_url"],
         thumbnail_url=launch.get("thumbnail_url"),
         page_id=os.getenv("META_PAGE_ID"),
-        ad_copy=AdCopy(**launch["copy"]),
+        ad_copies=[AdCopy(**v) for v in get_copy_variants(launch)],
         config=LaunchConfig(**launch["config"]),
     )
 
     platform = get_founder_platform()
     ads_db.update_ad_launch(launch_id, {"status": "launching", "error": None})
     try:
-        platform.launch(
+        ids = platform.launch(
             spec,
             platform_ids=launch.get("platform_ids", {}),
             persist=lambda key, value: ads_db.set_platform_id(launch_id, key, value),
         )
+        # Legacy aliases = variant 0, so readers deployed before A/B variants
+        # (old frontend, scripts) keep working on new docs.
+        for legacy, indexed in (("creative_id", "creative_id_0"), ("ad_id", "ad_id_0")):
+            if ids.get(indexed) and not ids.get(legacy):
+                ads_db.set_platform_id(launch_id, legacy, ids[indexed])
         ads_db.update_ad_launch(launch_id, {"status": "paused", "launched_at": time.time()})
         logger.info("Launch complete (PAUSED)", extra={"launch_id": launch_id})
     except Exception as e:

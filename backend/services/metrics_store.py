@@ -60,22 +60,35 @@ class MetricsStore:
         return self.db is not None
 
     def record_daily_metrics(self, launch: Dict[str, Any], insights: list) -> int:
-        """Upsert one document per (launch, day) from Meta Insights rows."""
+        """Upsert one document per (launch, day, ad) from Meta Insights rows.
+        Rows are per-ad (one ad per copy variant), so the agent can compare
+        variants directly."""
+        from backend.services.ads_service.base import get_ad_entries, get_copy_variants
+
         db = self.db
         if db is None or not insights:
             return 0
+        variants = get_copy_variants(launch)
+        index_by_ad = {e["ad_id"]: e["index"]
+                       for e in get_ad_entries(launch.get("platform_ids") or {})}
         written = 0
         for row in insights:
             date = row.get("date_start")
             if not date:
                 continue
+            ad_id = row.get("ad_id", "")
+            index = index_by_ad.get(ad_id, 0)
+            headline = (variants[index].get("headline", "") if index < len(variants)
+                        else (launch.get("copy") or {}).get("headline", ""))
             db.metrics_daily.update_one(
-                {"launch_id": launch["launch_id"], "date": date},
+                {"launch_id": launch["launch_id"], "date": date, "ad_id": ad_id},
                 {"$set": {
                     "launch_id": launch["launch_id"],
                     "user_id": launch.get("user_id"),
                     "platform": launch.get("platform", "meta"),
-                    "headline": (launch.get("copy") or {}).get("headline", ""),
+                    "ad_id": ad_id,
+                    "variant_index": index,
+                    "headline": headline,
                     "date": date,
                     "impressions": int(float(row.get("impressions", 0) or 0)),
                     "clicks": int(float(row.get("clicks", 0) or 0)),
@@ -109,6 +122,8 @@ class MetricsStore:
                 "currency": (launch.get("config") or {}).get("currency", ""),
                 "landing_url": (launch.get("config") or {}).get("landing_url", ""),
                 "source_run_id": launch.get("source_run_id"),
+                "num_variants": launch.get("num_variants", 1),
+                "variant_metrics": launch.get("variant_metrics") or [],
                 "impressions": lifetime.get("impressions", 0),
                 "clicks": lifetime.get("clicks", 0),
                 "spend": lifetime.get("spend", 0),

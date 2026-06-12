@@ -7,7 +7,11 @@ META_GRAPH_API_VERSION env; bump it in one place.
 
 Launch state machine (each step persists its id before the next starts, so a
 killed/retried launch resumes without duplicates):
-  video → (wait for processing) → creative → campaign → adset → ad
+  video → (wait for processing) → campaign → adset → creative+ad per variant
+
+One launch carries 1-3 copy variants; each becomes its own creative + ad
+inside the shared adset (the A/B test unit). Copy lives on the creative, so
+N variants require N creatives even though they share one video.
 
 Everything is created with status PAUSED. Activation is a separate explicit
 set_status() call — never part of launch().
@@ -19,15 +23,21 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from backend.logger import get_logger
-from backend.services.ads_service.base import AdsPlatform, LaunchSpec, PersistFn
+from backend.services.ads_service.base import (AdCopy, AdsPlatform, LaunchSpec,
+                                                PersistFn, get_ad_entries)
 
 logger = get_logger(__name__)
 
 GRAPH_VERSION = os.getenv("META_GRAPH_API_VERSION", "v23.0")
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
-# Steps in launch order with the platform_ids key each one fills.
-LAUNCH_STEPS = ["video_id", "creative_id", "campaign_id", "adset_id", "ad_id"]
+
+def launch_step_keys(num_variants: int) -> List[str]:
+    """platform_ids keys in launch order for an N-variant launch."""
+    keys = ["video_id", "campaign_id", "adset_id"]
+    for i in range(num_variants):
+        keys += [f"creative_id_{i}", f"ad_id_{i}"]
+    return keys
 
 
 class MetaAPIError(Exception):
@@ -136,17 +146,17 @@ class MetaAdsPlatform(AdsPlatform):
             logger.warning(f"Thumbnail fetch failed for video {video_id}: {e}")
             return None
 
-    def create_creative(self, spec: LaunchSpec, video_id: str) -> str:
-        thumbnail = self.get_video_thumbnail(video_id) or spec.thumbnail_url
-        if not thumbnail:
-            raise MetaAPIError(None, "No thumbnail available: Meta requires image_url "
-                                     "for video creatives. Pass thumbnail_url in the spec.")
+    def create_creative(self, spec: LaunchSpec, video_id: str, copy: AdCopy,
+                        index: int, thumbnail: str,
+                        ig_actor: Optional[str]) -> str:
+        # thumbnail and ig_actor are resolved once per launch (they're shared
+        # across variants) and passed in — see launch().
         video_data: Dict[str, Any] = {
             "video_id": video_id,
             "image_url": thumbnail,
-            "message": spec.ad_copy.primary_text,
-            "title": spec.ad_copy.headline,
-            "link_description": spec.ad_copy.description,
+            "message": copy.primary_text,
+            "title": copy.headline,
+            "link_description": copy.description,
             "call_to_action": {
                 "type": spec.config.cta_type,
                 "value": {"link": spec.config.landing_url},
@@ -154,16 +164,12 @@ class MetaAdsPlatform(AdsPlatform):
         }
         story_spec: Dict[str, Any] = {"page_id": spec.page_id or self.page_id,
                                       "video_data": video_data}
-        # Without an IG identity Meta rejects the creative ("Ad account has no
-        # access to this Instagram account") even for fb-only placements.
-        # ensure_instagram_actor() resolves/creates a page-backed IG account.
-        ig_actor = self.ensure_instagram_actor()
         if ig_actor:
             # NOTE: instagram_actor_id is rejected on v23+ — instagram_user_id
             # is the accepted field (PBIA ids work here).
             story_spec["instagram_user_id"] = ig_actor
         body = self._post(f"{self.account_id}/adcreatives", {
-            "name": f"{spec.name} — creative",
+            "name": f"{spec.name} — creative v{index + 1}",
             "object_story_spec": story_spec,
         })
         return body["id"]
@@ -243,9 +249,10 @@ class MetaAdsPlatform(AdsPlatform):
         body = self._post(f"{self.account_id}/adsets", payload)
         return body["id"]
 
-    def create_ad(self, spec: LaunchSpec, adset_id: str, creative_id: str) -> str:
+    def create_ad(self, spec: LaunchSpec, adset_id: str, creative_id: str,
+                  index: int) -> str:
         body = self._post(f"{self.account_id}/ads", {
-            "name": f"{spec.name} — ad",
+            "name": f"{spec.name} — ad v{index + 1}",
             "adset_id": adset_id,
             "creative": {"creative_id": creative_id},
             "status": "PAUSED",
@@ -257,6 +264,11 @@ class MetaAdsPlatform(AdsPlatform):
     def launch(self, spec: LaunchSpec, platform_ids: Dict[str, str],
                persist: PersistFn) -> Dict[str, str]:
         ids = dict(platform_ids or {})
+        # Docs from before A/B variants persisted singular creative_id/ad_id —
+        # treat them as variant 0 so an interrupted old launch still resumes.
+        for legacy, indexed in (("creative_id", "creative_id_0"), ("ad_id", "ad_id_0")):
+            if ids.get(legacy) and not ids.get(indexed):
+                ids[indexed] = ids[legacy]
 
         def step(key: str, fn) -> str:
             if ids.get(key):
@@ -271,40 +283,84 @@ class MetaAdsPlatform(AdsPlatform):
         video_id = step("video_id", lambda: self.upload_video(spec.video_url, spec.name))
         # wait_for_video is safe to repeat — a ready video returns immediately
         self.wait_for_video(video_id)
-        creative_id = step("creative_id", lambda: self.create_creative(spec, video_id))
         campaign_id = step("campaign_id", lambda: self.create_campaign(spec))
         adset_id = step("adset_id", lambda: self.create_adset(spec, campaign_id))
-        step("ad_id", lambda: self.create_ad(spec, adset_id, creative_id))
+
+        # Thumbnail + IG identity are shared by every variant's creative —
+        # resolve once, and only when a creative still needs creating.
+        thumbnail = ig_actor = None
+        if any(not ids.get(f"creative_id_{i}") for i in range(len(spec.ad_copies))):
+            thumbnail = self.get_video_thumbnail(video_id) or spec.thumbnail_url
+            if not thumbnail:
+                raise MetaAPIError(None, "No thumbnail available: Meta requires image_url "
+                                         "for video creatives. Pass thumbnail_url in the spec.")
+            # Without an IG identity Meta rejects the creative ("Ad account has
+            # no access to this Instagram account") even for fb-only placements.
+            ig_actor = self.ensure_instagram_actor()
+
+        for i, copy in enumerate(spec.ad_copies):
+            creative_id = step(f"creative_id_{i}",
+                               lambda c=copy, i=i: self.create_creative(spec, video_id, c, i, thumbnail, ig_actor))
+            step(f"ad_id_{i}",
+                 lambda cid=creative_id, i=i: self.create_ad(spec, adset_id, cid, i))
         return ids
 
     # ----- Post-launch management ----------------------------------------
 
     def get_status(self, platform_ids: Dict[str, str]) -> Dict[str, Any]:
-        ad_id = platform_ids.get("ad_id")
-        if not ad_id:
+        entries = get_ad_entries(platform_ids)
+        if not entries:
             return {"effective_status": "NOT_LAUNCHED"}
-        body = self._get(ad_id, params={"fields": "effective_status,configured_status,ad_review_feedback"})
-        return body
+        ads = []
+        for entry in entries:
+            body = self._get(entry["ad_id"],
+                             params={"fields": "effective_status,configured_status,ad_review_feedback"})
+            ads.append({"index": entry["index"], "ad_id": entry["ad_id"],
+                        "effective_status": body.get("effective_status", "UNKNOWN"),
+                        "ad_review_feedback": body.get("ad_review_feedback")})
+        # Rollup across variants: problems first (so a single rejected variant
+        # surfaces), then delivery, then review-in-flight.
+        statuses = [a["effective_status"] for a in ads]
+        rollup = next((s for s in ("DISAPPROVED", "WITH_ISSUES", "ACTIVE",
+                                   "IN_PROCESS", "PENDING_REVIEW") if s in statuses),
+                      statuses[0])
+        feedback = next((a["ad_review_feedback"] for a in ads if a["ad_review_feedback"]), None)
+        return {"effective_status": rollup, "ad_review_feedback": feedback, "ads": ads}
 
     def set_status(self, platform_ids: Dict[str, str], status: str) -> None:
         if status not in ("ACTIVE", "PAUSED"):
             raise ValueError(f"Invalid status {status}")
         # Activating requires all three levels ACTIVE (everything is created
         # PAUSED); pausing the campaign alone stops delivery, but we keep the
-        # three levels consistent either way.
-        for key in ("campaign_id", "adset_id", "ad_id"):
-            obj_id = platform_ids.get(key)
+        # levels consistent either way — including every variant ad.
+        obj_ids = [platform_ids.get("campaign_id"), platform_ids.get("adset_id")]
+        obj_ids += [e["ad_id"] for e in get_ad_entries(platform_ids)]
+        for obj_id in obj_ids:
             if obj_id:
                 self._post(obj_id, {"status": status})
 
     def get_insights(self, platform_ids: Dict[str, str],
                      date_preset: str = "last_7d") -> List[Dict[str, Any]]:
-        ad_id = platform_ids.get("ad_id")
-        if not ad_id:
+        # One adset-level call covers every variant; rows come back tagged
+        # with ad_id/ad_name via level=ad.
+        adset_id = platform_ids.get("adset_id")
+        if adset_id:
+            body = self._get(f"{adset_id}/insights", params={
+                "fields": "ad_id,ad_name,impressions,clicks,ctr,spend,actions",
+                "level": "ad",
+                "date_preset": date_preset,
+                "time_increment": 1,
+            })
+            return body.get("data", [])
+        entries = get_ad_entries(platform_ids)
+        if not entries:
             return []
-        body = self._get(f"{ad_id}/insights", params={
+        body = self._get(f"{entries[0]['ad_id']}/insights", params={
             "fields": "impressions,clicks,ctr,spend,actions",
             "date_preset": date_preset,
             "time_increment": 1,
         })
-        return body.get("data", [])
+        rows = body.get("data", [])
+        for row in rows:
+            row.setdefault("ad_id", entries[0]["ad_id"])
+        return rows

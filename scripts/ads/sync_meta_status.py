@@ -16,7 +16,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, ROOT)
 load_dotenv(os.path.join(ROOT, ".env"))
 
-from backend.services.ads_service import AdsFactory  # noqa: E402
+from backend.services.ads_service import AdsFactory, get_ad_entries  # noqa: E402
 from backend.services.db_service import ads_db  # noqa: E402
 
 # Meta effective_status → our launch status (only transitions we act on)
@@ -58,7 +58,8 @@ def main():
     for launch in launches:
         lid = launch["launch_id"]
         ids = launch.get("platform_ids") or {}
-        if not ids.get("ad_id"):
+        entries = get_ad_entries(ids)
+        if not entries:
             print(f"{lid}: not fully launched (status={launch['status']}), skipping")
             continue
 
@@ -76,14 +77,20 @@ def main():
         ads_db.update_ad_launch(lid, updates)
 
         line = f"{lid}: {launch['status']} → effective_status={effective}"
+        if len(entries) > 1:
+            per_ad = meta_status.get("ads") or []
+            line += " [" + ", ".join(f"v{a['index'] + 1}={a['effective_status']}" for a in per_ad) + "]"
         if review_feedback:
             line += f"  ⚠️ feedback: {review_feedback}"
         print(line)
 
         if args.insights:
+            index_by_ad = {e["ad_id"]: e["index"] for e in entries}
             insights = platform.get_insights(ids)
             for row in insights:
-                print(f"    {row.get('date_start')}: {row.get('impressions', 0)} impr, "
+                variant = (f" v{index_by_ad[row['ad_id']] + 1}"
+                           if len(entries) > 1 and row.get("ad_id") in index_by_ad else "")
+                print(f"    {row.get('date_start')}{variant}: {row.get('impressions', 0)} impr, "
                       f"{row.get('clicks', 0)} clicks, ctr={row.get('ctr', '0')}, "
                       f"spend={row.get('spend', '0')}")
             # Mirror into MongoDB analytics store (agent queries via MCP)
