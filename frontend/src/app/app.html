@@ -63,15 +63,16 @@
           </div>
 
           @if (c.status === 'launching') {
+            @let csteps = stepsFor(c);
             <div class="stepper" aria-label="Launch progress">
-              @for (s of steps; track s.key; let si = $index) {
+              @for (s of csteps; track s.key; let si = $index) {
                 <div class="step"
                      [class.done]="stepDone(c, s.key)"
                      [class.current]="si === stepCurrent(c)">
                   <span class="step-dot">@if (stepDone(c, s.key)) {✓}</span>
                   <span class="step-label">{{ s.label }}</span>
                 </div>
-                @if (si < steps.length - 1) { <span class="step-bar" [class.done]="stepDone(c, steps[si + 1].key) || stepDone(c, s.key)"></span> }
+                @if (si < csteps.length - 1) { <span class="step-bar" [class.done]="stepDone(c, csteps[si + 1].key) || stepDone(c, s.key)"></span> }
               }
             </div>
           }
@@ -81,6 +82,20 @@
               <span><b>{{ c.lifetime.impressions || 0 }}</b> impressions</span>
               <span><b>{{ c.lifetime.clicks || 0 }}</b> clicks</span>
               <span><b>{{ currencySymbol(c) }}{{ c.lifetime.spend || 0 }}</b> spent</span>
+            </div>
+          }
+
+          @if ((c.variant_metrics?.length || 0) > 1) {
+            <div class="variant-board" aria-label="A/B variants">
+              @for (m of c.variant_metrics; track m.index) {
+                <div class="variant-row" [class.top]="m.index === topVariant(c)">
+                  <span class="v-tag">v{{ m.index + 1 }}</span>
+                  <span class="v-headline">{{ m.headline }}</span>
+                  <span class="v-stat"><b>{{ m.ctr }}%</b> CTR</span>
+                  <span class="v-stat"><b>{{ m.clicks }}</b> clicks</span>
+                  @if (m.index === topVariant(c)) { <span class="badge v-top-badge">Top</span> }
+                </div>
+              }
             </div>
           }
           @if (c.error) { <div class="small error-text">{{ c.error }}</div> }
@@ -131,20 +146,40 @@
 
         <div class="copy-head">
           <h4>Ad copy</h4>
-          <button class="gemini" [class.thinking]="suggesting()" [disabled]="suggesting()" (click)="suggestCopy()">
-            @if (suggesting()) {
-              <span class="orbit sm"></span> Gemini is writing…
-            } @else {
-              ✨ Suggest with Gemini
-            }
-          </button>
+          <div class="copy-tools">
+            <div class="seg" role="group" aria-label="Number of A/B variants">
+              <span class="seg-label">Variants</span>
+              @for (n of [1, 2, 3]; track n) {
+                <button class="seg-btn" [class.on]="numVariants === n" [disabled]="suggesting() || launching()"
+                        (click)="setNumVariants(n)">{{ n }}</button>
+              }
+            </div>
+            <button class="gemini" [class.thinking]="suggesting()" [disabled]="suggesting()" (click)="suggestCopy()">
+              @if (suggesting()) {
+                <span class="orbit sm"></span> Gemini is writing…
+              } @else {
+                ✨ Suggest with Gemini
+              }
+            </button>
+          </div>
         </div>
+        @if (numVariants > 1) {
+          <div class="vtabs" role="tablist">
+            @for (v of variants; track $index) {
+              <button class="vtab" role="tab" [class.on]="activeVariant === $index"
+                      (click)="activeVariant = $index">
+                v{{ $index + 1 }}@if (v.headline) {<span class="vtab-hint"> · {{ v.headline.slice(0, 18) }}</span>}
+              </button>
+            }
+          </div>
+          <p class="hint small variant-note">One ad per variant — same video, different copy. For a fair test, budget ≈ ₹100 × variants.</p>
+        }
         <label>Primary text
-          <textarea rows="2" [(ngModel)]="primaryText" [class.shimmer]="suggesting()" [disabled]="suggesting()"></textarea>
+          <textarea rows="2" [(ngModel)]="variants[activeVariant].primaryText" [class.shimmer]="suggesting()" [disabled]="suggesting()"></textarea>
         </label>
         <div class="grid2">
-          <label>Headline <input [(ngModel)]="headline" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
-          <label>Description <input [(ngModel)]="description" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
+          <label>Headline <input [(ngModel)]="variants[activeVariant].headline" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
+          <label>Description <input [(ngModel)]="variants[activeVariant].description" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
         </div>
 
         @if (error()) { <div class="alert">{{ error() }}</div> }

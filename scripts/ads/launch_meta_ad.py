@@ -14,6 +14,11 @@ Examples:
   python scripts/ads/launch_meta_ad.py --run-id run_abc123 \\
       --daily-budget-cents 100 --landing-url https://example.com --ai-copy
 
+  # A/B test: one video, 3 ads with different Gemini copy in one adset
+  python scripts/ads/launch_meta_ad.py --run-id run_abc123 \\
+      --daily-budget-cents 30000 --landing-url https://example.com \\
+      --ai-copy --num-variants 3
+
   # Launch any public video URL with manual copy
   python scripts/ads/launch_meta_ad.py --video-url https://storage.googleapis.com/.../ad.mp4 \\
       --daily-budget-cents 100 --landing-url https://example.com \\
@@ -36,7 +41,8 @@ sys.path.insert(0, ROOT)
 load_dotenv(os.path.join(ROOT, ".env"))
 
 from backend.logger import get_logger  # noqa: E402
-from backend.services.ads_service import AdCopy, AdsFactory, LaunchConfig, LaunchSpec, Targeting  # noqa: E402
+from backend.services.ads_service import (AdCopy, AdsFactory, LaunchConfig, LaunchSpec,  # noqa: E402
+                                          Targeting, get_copy_variants)
 from backend.services.ads_service.cost import charge_ad_launch  # noqa: E402
 from backend.services.db_service import ads_db, new_launch_id  # noqa: E402
 
@@ -132,7 +138,7 @@ def run_launch(launch_id: str) -> None:
         video_url=launch["video_url"],
         thumbnail_url=launch.get("thumbnail_url"),
         page_id=os.getenv("META_PAGE_ID"),
-        ad_copy=AdCopy(**launch["copy"]),
+        ad_copies=[AdCopy(**v) for v in get_copy_variants(launch)],
         config=LaunchConfig(**launch["config"]),
     )
 
@@ -144,6 +150,10 @@ def run_launch(launch_id: str) -> None:
             platform_ids=launch.get("platform_ids", {}),
             persist=lambda key, value: ads_db.set_platform_id(launch_id, key, value),
         )
+        # Legacy aliases = variant 0 (readers from before A/B variants)
+        for legacy, indexed in (("creative_id", "creative_id_0"), ("ad_id", "ad_id_0")):
+            if ids.get(indexed) and not ids.get(legacy):
+                ads_db.set_platform_id(launch_id, legacy, ids[indexed])
     except Exception as e:
         ads_db.update_ad_launch(launch_id, {"status": "error", "error": str(e)})
         print(f"\n❌ Launch failed at a step: {e}")
@@ -181,6 +191,8 @@ def main():
 
     copy = parser.add_argument_group("ad copy (manual or --ai-copy)")
     copy.add_argument("--ai-copy", action="store_true", help="Generate copy with Gemini from run script + brand kit")
+    copy.add_argument("--num-variants", type=int, default=1, choices=[1, 2, 3],
+                      help="A/B test: ads per launch, one per Gemini copy variant (needs --ai-copy)")
     copy.add_argument("--primary-text")
     copy.add_argument("--headline")
     copy.add_argument("--description", default="")
@@ -233,20 +245,26 @@ def main():
             sys.exit(f"❌ Run {args.run_id} has no final video URL (status: {run.get('status')})")
         video_script = str((run.get("result") or {}).get("config", {}).get("prompt", ""))
 
-    # Resolve copy
+    # Resolve copy (1-3 variants → one ad each inside the shared adset)
+    if args.num_variants > 1 and not args.ai_copy:
+        sys.exit("--num-variants > 1 needs --ai-copy (manual copy is single-variant)")
     if args.ai_copy:
-        from backend.services.ads_service.ai_copy import generate_ad_copy
+        from backend.services.ads_service.ai_copy import generate_ad_copy_variants
         brand = ads_db.get_brand(args.user_id)
-        suggestion = generate_ad_copy(video_script, args.landing_url, brand)
-        print("\nAI copy suggestion:")
-        for k, v in suggestion.items():
-            print(f"  {k}: {v}")
+        suggestions = generate_ad_copy_variants(video_script, args.landing_url, brand,
+                                                num_variants=args.num_variants)
+        print(f"\nAI copy suggestion{'s' if len(suggestions) > 1 else ''}:")
+        for i, s in enumerate(suggestions):
+            if len(suggestions) > 1:
+                print(f"  — variant {i + 1} —")
+            for k, v in s.items():
+                print(f"  {k}: {v}")
         if input("Use this copy? [Y/n]: ").strip().lower() in ("n", "no"):
             sys.exit("Aborted — re-run with manual --primary-text/--headline.")
-        ad_copy = AdCopy(**suggestion, ai_generated=True)
+        ad_copies = [AdCopy(**s, ai_generated=True) for s in suggestions]
     elif args.primary_text and args.headline:
-        ad_copy = AdCopy(primary_text=args.primary_text, headline=args.headline,
-                         description=args.description)
+        ad_copies = [AdCopy(primary_text=args.primary_text, headline=args.headline,
+                            description=args.description)]
     else:
         sys.exit("Provide copy: --ai-copy OR both --primary-text and --headline")
 
@@ -268,7 +286,8 @@ def main():
                             age_min=args.age_min, age_max=args.age_max),
     )
 
-    credits = charge_ad_launch(args.user_id, launch_id, config.model_dump())
+    credits = charge_ad_launch(args.user_id, launch_id,
+                               {**config.model_dump(), "num_variants": len(ad_copies)})
     created = ads_db.create_ad_launch(launch_id, args.user_id, {
         "platform": "meta",
         "ad_account_doc_id": account["doc_id"],
@@ -276,7 +295,10 @@ def main():
         "video_url": video_url,
         "name": name,
         "config": config.model_dump(),
-        "copy": ad_copy.model_dump(),
+        # `copy` stays = variant 0 for pre-variant readers
+        "copy": ad_copies[0].model_dump(),
+        "copy_variants": [c.model_dump() for c in ad_copies],
+        "num_variants": len(ad_copies),
         "credits_charged": credits,
     })
     if not created:

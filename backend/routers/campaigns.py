@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import get_current_user
 from backend.logger import get_logger
-from backend.services.ads_service.ai_copy import generate_ad_copy
+from backend.services.ads_service.ai_copy import generate_ad_copy_variants
+from backend.services.ads_service.base import (MAX_COPY_VARIANTS, get_ad_entries,
+                                               get_copy_variants)
 from backend.services.ads_service.cost import charge_ad_launch
 from backend.services.ads_service.launcher import get_founder_platform, run_launch
 from backend.services.db_service import ads_db, new_launch_id
@@ -28,6 +30,12 @@ STATUS_MAP = {
 }
 
 
+class CopyVariant(BaseModel):
+    primary_text: str
+    headline: str
+    description: str = ""
+
+
 class LaunchRequest(BaseModel):
     run_id: Optional[str] = None
     video_url: Optional[str] = None
@@ -39,6 +47,9 @@ class LaunchRequest(BaseModel):
     age_min: int = 18
     age_max: int = 65
     name: Optional[str] = None
+    # A/B test: 1-3 copy variants, one ad each. The singular fields below are
+    # the pre-variant API shape — still accepted as a one-variant launch.
+    variants: Optional[list[CopyVariant]] = Field(default=None, max_length=MAX_COPY_VARIANTS)
     primary_text: Optional[str] = None
     headline: Optional[str] = None
     description: str = ""
@@ -49,6 +60,7 @@ class CopySuggestRequest(BaseModel):
     run_id: Optional[str] = None
     landing_url: str
     product_hint: str = ""
+    num_variants: int = Field(default=1, ge=1, le=MAX_COPY_VARIANTS)
 
 
 class ConfirmBody(BaseModel):
@@ -74,6 +86,25 @@ def _own_launch_or_404(launch_id: str, user_id: str) -> dict:
     if not launch or launch.get("user_id") != user_id:
         raise HTTPException(status_code=404, detail="Launch not found")
     return launch
+
+
+def _variant_metrics(entries: list, insights: list, headline_for) -> list:
+    """Lifetime metrics per variant ad — the A/B winner comparison."""
+    index_by_ad = {e["ad_id"]: e["index"] for e in entries}
+    by_ad: dict = {}
+    for row in insights:
+        agg = by_ad.setdefault(row.get("ad_id"), {"impressions": 0, "clicks": 0, "spend": 0.0})
+        agg["impressions"] += int(float(row.get("impressions", 0) or 0))
+        agg["clicks"] += int(float(row.get("clicks", 0) or 0))
+        agg["spend"] += float(row.get("spend", 0) or 0)
+    metrics = []
+    for ad_id, agg in by_ad.items():
+        index = index_by_ad.get(ad_id, 0)
+        ctr = round(agg["clicks"] / agg["impressions"] * 100, 2) if agg["impressions"] else 0.0
+        metrics.append({"index": index, "ad_id": ad_id, "headline": headline_for(index),
+                        "impressions": agg["impressions"], "clicks": agg["clicks"],
+                        "spend": round(agg["spend"], 2), "ctr": ctr})
+    return sorted(metrics, key=lambda m: m["index"])
 
 
 @router.get("/runs")
@@ -116,10 +147,13 @@ async def copy_suggest(req: CopySuggestRequest, user: dict = Depends(require_lau
             video_script = str((run.get("request") or {}).get("prompt", ""))
     brand = ads_db.get_brand(user["uid"])
     try:
-        copy = generate_ad_copy(video_script, req.landing_url, brand, req.product_hint)
+        variants = generate_ad_copy_variants(video_script, req.landing_url, brand,
+                                             req.product_hint, req.num_variants)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Copy generation failed: {e}")
-    return copy
+    # Variant 0 flattened at the top level = the pre-variant response shape
+    # (deployed frontends keep working through the rollout).
+    return {"variants": variants, **variants[0]}
 
 
 @router.post("/launch")
@@ -138,8 +172,16 @@ async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
         video_url = (run.get("result") or {}).get("video_url")
     if not video_url:
         raise HTTPException(status_code=400, detail="Provide run_id or video_url")
-    if not req.primary_text or not req.headline:
-        raise HTTPException(status_code=400, detail="primary_text and headline required "
+
+    if req.variants:
+        copy_variants = [{**v.model_dump(), "ai_generated": req.ai_generated}
+                         for v in req.variants]
+    elif req.primary_text and req.headline:
+        copy_variants = [{"primary_text": req.primary_text, "headline": req.headline,
+                          "description": req.description, "ai_generated": req.ai_generated}]
+    else:
+        raise HTTPException(status_code=400, detail="Provide variants (1-3) or "
+                                                    "primary_text + headline "
                                                     "(use /copy-suggest first)")
 
     account = ads_db.upsert_env_ad_account(
@@ -169,16 +211,20 @@ async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
         "cta_type": req.cta_type,
         "targeting": {"countries": req.countries, "age_min": req.age_min, "age_max": req.age_max},
     }
-    credits = charge_ad_launch(user["uid"], launch_id, config)
+    credits = charge_ad_launch(user["uid"], launch_id,
+                               {**config, "num_variants": len(copy_variants)})
     ads_db.create_ad_launch(launch_id, user["uid"], {
         "platform": "meta",
         "ad_account_doc_id": account["doc_id"],
         "source_run_id": req.run_id,
         "video_url": video_url,
-        "name": req.name or f"{req.headline} — IgniteAds",
+        "name": req.name or f"{copy_variants[0]['headline']} — IgniteAds",
         "config": config,
-        "copy": {"primary_text": req.primary_text, "headline": req.headline,
-                 "description": req.description, "ai_generated": req.ai_generated},
+        # `copy` stays = variant 0: metrics_store, card titles, and old
+        # deployed frontends read it.
+        "copy": copy_variants[0],
+        "copy_variants": copy_variants,
+        "num_variants": len(copy_variants),
         "credits_charged": credits,
     })
 
@@ -228,15 +274,25 @@ async def pause(launch_id: str, user: dict = Depends(require_launch_access)):
 
 @router.post("/campaigns/{launch_id}/sync")
 async def sync_status(launch_id: str, user: dict = Depends(require_launch_access)):
-    """Refresh Meta review/delivery status + last-7d insights."""
+    """Refresh Meta review/delivery status + last-7d insights (all variants)."""
     launch = _own_launch_or_404(launch_id, user["uid"])
     ids = launch.get("platform_ids") or {}
-    if not ids.get("ad_id"):
+    entries = get_ad_entries(ids)
+    if not entries:
         return launch
     platform = get_founder_platform()
     meta_status = platform.get_status(ids)
     effective = meta_status.get("effective_status", "UNKNOWN")
-    updates = {"review_status": effective}
+    variants = get_copy_variants(launch)
+
+    def headline_for(index: int) -> str:
+        return variants[index].get("headline", "") if index < len(variants) else ""
+
+    updates = {"review_status": effective,
+               "ads": [{"index": a["index"], "ad_id": a["ad_id"],
+                        "effective_status": a["effective_status"],
+                        "headline": headline_for(a["index"])}
+                       for a in meta_status.get("ads") or []]}
     mapped = STATUS_MAP.get(effective)
     if mapped and mapped != launch["status"]:
         updates["status"] = mapped
@@ -247,6 +303,7 @@ async def sync_status(launch_id: str, user: dict = Depends(require_launch_access
             "impressions": int(total("impressions")), "clicks": int(total("clicks")),
             "spend": round(total("spend"), 2),
         }
+        updates["variant_metrics"] = _variant_metrics(entries, insights, headline_for)
     ads_db.update_ad_launch(launch_id, updates)
     launch = ads_db.get_ad_launch(launch_id)
 
