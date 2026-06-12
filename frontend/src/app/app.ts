@@ -26,6 +26,7 @@ interface Campaign {
   num_variants?: number;
   platform_ids: any;
   lifetime?: { impressions?: number; clicks?: number; spend?: number };
+  daily?: { date: string; impressions: number; clicks: number; spend: number }[];
   variant_metrics?: VariantMetric[];
   ads?: { index: number; ad_id: string; effective_status: string; headline: string }[];
   created_at: number;
@@ -360,6 +361,23 @@ export class App implements OnInit {
   /** Index of the step currently executing (first one without an id). */
   stepCurrent(c: Campaign): number {
     return this.stepsFor(c).findIndex((s) => !this.stepDone(c, s.key));
+  }
+
+  /** Daily impressions normalized into the sparkline's 120×28 viewBox. */
+  sparkPoints(c: Campaign): string {
+    const days = c.daily || [];
+    if (days.length < 2) return '';
+    const vals = days.map((d) => d.impressions || 0);
+    const min = Math.min(...vals);
+    const range = Math.max(...vals) - min || 1;
+    const w = 120, h = 28, pad = 2;
+    return vals
+      .map((v, i) => {
+        const x = pad + (i * (w - 2 * pad)) / (vals.length - 1);
+        const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
   }
 
   /** Winning variant index by CTR — only once it has enough impressions. */

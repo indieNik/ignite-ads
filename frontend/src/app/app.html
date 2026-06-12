@@ -82,6 +82,14 @@
               <span><b>{{ c.lifetime.impressions || 0 }}</b> impressions</span>
               <span><b>{{ c.lifetime.clicks || 0 }}</b> clicks</span>
               <span><b>{{ currencySymbol(c) }}{{ c.lifetime.spend || 0 }}</b> spent</span>
+              @if ((c.daily?.length || 0) >= 2) {
+                <span class="spark" title="Daily impressions trend">
+                  <svg viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true">
+                    <polyline [attr.points]="sparkPoints(c)" />
+                  </svg>
+                  <span class="spark-label">{{ c.daily!.length }}d trend</span>
+                </span>
+              }
             </div>
           }
 

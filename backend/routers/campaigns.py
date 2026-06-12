@@ -6,28 +6,23 @@ but every route is auth-gated and ownership-scoped so the Phase B multi-tenant
 swap only touches the token-resolution layer.
 """
 import os
+import secrets
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.dependencies import get_current_user
 from backend.logger import get_logger
 from backend.services.ads_service.ai_copy import generate_ad_copy_variants
-from backend.services.ads_service.base import (MAX_COPY_VARIANTS, get_ad_entries,
-                                               get_copy_variants)
+from backend.services.ads_service.base import MAX_COPY_VARIANTS, get_ad_entries
 from backend.services.ads_service.cost import charge_ad_launch
 from backend.services.ads_service.launcher import get_founder_platform, run_launch
 from backend.services.db_service import ads_db, new_launch_id
+from backend.services.sync_service import sync_launch
 
 logger = get_logger(__name__)
 router = APIRouter()
-
-STATUS_MAP = {
-    "ACTIVE": "active", "PAUSED": "paused", "CAMPAIGN_PAUSED": "paused",
-    "ADSET_PAUSED": "paused", "DISAPPROVED": "rejected", "WITH_ISSUES": "rejected",
-    "ARCHIVED": "archived", "DELETED": "archived",
-}
 
 
 class CopyVariant(BaseModel):
@@ -88,23 +83,17 @@ def _own_launch_or_404(launch_id: str, user_id: str) -> dict:
     return launch
 
 
-def _variant_metrics(entries: list, insights: list, headline_for) -> list:
-    """Lifetime metrics per variant ad — the A/B winner comparison."""
-    index_by_ad = {e["ad_id"]: e["index"] for e in entries}
-    by_ad: dict = {}
-    for row in insights:
-        agg = by_ad.setdefault(row.get("ad_id"), {"impressions": 0, "clicks": 0, "spend": 0.0})
-        agg["impressions"] += int(float(row.get("impressions", 0) or 0))
-        agg["clicks"] += int(float(row.get("clicks", 0) or 0))
-        agg["spend"] += float(row.get("spend", 0) or 0)
-    metrics = []
-    for ad_id, agg in by_ad.items():
-        index = index_by_ad.get(ad_id, 0)
-        ctr = round(agg["clicks"] / agg["impressions"] * 100, 2) if agg["impressions"] else 0.0
-        metrics.append({"index": index, "ad_id": ad_id, "headline": headline_for(index),
-                        "impressions": agg["impressions"], "clicks": agg["clicks"],
-                        "spend": round(agg["spend"], 2), "ctr": ctr})
-    return sorted(metrics, key=lambda m: m["index"])
+def require_task_auth(x_task_auth: Optional[str] = Header(None)) -> None:
+    """Gate for machine endpoints (Cloud Tasks / Cloud Scheduler): the caller
+    must present the shared ADS_TASK_AUTH_TOKEN. When the env var is unset the
+    gate is open (local dev / first rollout) — loudly, so it gets set."""
+    expected = os.getenv("ADS_TASK_AUTH_TOKEN", "")
+    if not expected:
+        logger.warning("ADS_TASK_AUTH_TOKEN unset — task endpoints are UNGATED; "
+                       "set it in .config/cloud-run-env.yaml and redeploy")
+        return
+    if not x_task_auth or not secrets.compare_digest(x_task_auth, expected):
+        raise HTTPException(status_code=403, detail="Bad or missing X-Task-Auth")
 
 
 @router.get("/runs")
@@ -238,8 +227,8 @@ async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
 
 
 @router.post("/task/run")
-async def task_run(body: dict):
-    """Cloud Tasks handler. Header-gated like IgniteAI's /api/task/run."""
+async def task_run(body: dict, _: None = Depends(require_task_auth)):
+    """Cloud Tasks handler — gated by X-Task-Auth (require_task_auth)."""
     import asyncio
     launch_id = body.get("launch_id")
     if not launch_id:
@@ -247,6 +236,32 @@ async def task_run(body: dict):
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, run_launch, launch_id)
     return {"status": "done", "launch_id": launch_id}
+
+
+@router.post("/task/sync-all")
+async def task_sync_all(_: None = Depends(require_task_auth)):
+    """Cloud Scheduler entrypoint — refresh every non-terminal launch from
+    Meta. Runs synchronously inside the request (Cloud Run throttles CPU
+    after the response; tens of launches × ~2 Graph calls fits the 600s
+    service timeout comfortably)."""
+    import asyncio
+
+    def _run():
+        launches = ads_db.list_ad_launches(
+            statuses=["launching", "paused", "active", "rejected"])
+        synced, errors = 0, []
+        for launch in launches:
+            if not get_ad_entries(launch.get("platform_ids") or {}):
+                continue
+            try:
+                sync_launch(launch)
+                synced += 1
+            except Exception as e:
+                errors.append({"launch_id": launch["launch_id"], "error": str(e)})
+        logger.info("sync-all done", extra={"data": {"synced": synced, "errors": len(errors)}})
+        return {"synced": synced, "errors": errors}
+
+    return await asyncio.get_event_loop().run_in_executor(None, _run)
 
 
 @router.post("/campaigns/{launch_id}/activate")
@@ -276,40 +291,4 @@ async def pause(launch_id: str, user: dict = Depends(require_launch_access)):
 async def sync_status(launch_id: str, user: dict = Depends(require_launch_access)):
     """Refresh Meta review/delivery status + last-7d insights (all variants)."""
     launch = _own_launch_or_404(launch_id, user["uid"])
-    ids = launch.get("platform_ids") or {}
-    entries = get_ad_entries(ids)
-    if not entries:
-        return launch
-    platform = get_founder_platform()
-    meta_status = platform.get_status(ids)
-    effective = meta_status.get("effective_status", "UNKNOWN")
-    variants = get_copy_variants(launch)
-
-    def headline_for(index: int) -> str:
-        return variants[index].get("headline", "") if index < len(variants) else ""
-
-    updates = {"review_status": effective,
-               "ads": [{"index": a["index"], "ad_id": a["ad_id"],
-                        "effective_status": a["effective_status"],
-                        "headline": headline_for(a["index"])}
-                       for a in meta_status.get("ads") or []]}
-    mapped = STATUS_MAP.get(effective)
-    if mapped and mapped != launch["status"]:
-        updates["status"] = mapped
-    insights = platform.get_insights(ids)
-    if insights:
-        total = lambda k: sum(float(r.get(k, 0) or 0) for r in insights)  # noqa: E731
-        updates["lifetime"] = {
-            "impressions": int(total("impressions")), "clicks": int(total("clicks")),
-            "spend": round(total("spend"), 2),
-        }
-        updates["variant_metrics"] = _variant_metrics(entries, insights, headline_for)
-    ads_db.update_ad_launch(launch_id, updates)
-    launch = ads_db.get_ad_launch(launch_id)
-
-    # Mirror into the MongoDB analytics store (agent queries it via MCP)
-    from backend.services.metrics_store import metrics_store
-    if metrics_store.is_enabled():
-        metrics_store.record_daily_metrics(launch, insights)
-        metrics_store.record_campaign_summary(launch)
-    return launch
+    return sync_launch(launch)
