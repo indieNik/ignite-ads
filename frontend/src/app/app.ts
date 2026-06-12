@@ -89,7 +89,9 @@ export class App implements OnInit {
   budget = 10000; // minor units (₹100.00 on INR accounts)
   numVariants = 1; // A/B test: one ad per copy variant, same video + adset
   activeVariant = 0;
-  variants: VariantForm[] = [this.emptyVariant()];
+  // Always 3 slots — the count control only changes how many are shown and
+  // submitted. Truncating here would destroy copy when toggling 3 → 2 → 3.
+  variants: VariantForm[] = Array.from({ length: 3 }, () => this.emptyVariant());
   aiGenerated = false;
 
   private toastSeq = 0;
@@ -147,15 +149,18 @@ export class App implements OnInit {
 
   setNumVariants(n: number) {
     this.numVariants = n;
-    while (this.variants.length < n) this.variants.push(this.emptyVariant());
-    this.variants.length = n;
     if (this.activeVariant >= n) this.activeVariant = n - 1;
+  }
+
+  /** The variants currently in play (shown as tabs, sent on launch). */
+  shownVariants(): VariantForm[] {
+    return this.variants.slice(0, this.numVariants);
   }
 
   async suggestCopy() {
     this.suggesting.set(true);
     this.error.set('');
-    this.variants = Array.from({ length: this.numVariants }, () => this.emptyVariant());
+    for (let i = 0; i < this.numVariants; i++) this.variants[i] = this.emptyVariant();
     this.activeVariant = 0;
     try {
       const res = await apiFetch('/api/ads/copy-suggest', {
@@ -196,7 +201,8 @@ export class App implements OnInit {
   async launch() {
     this.error.set('');
     if (!this.selectedRun && !this.videoUrl) { this.error.set('Pick a video or paste a URL'); return; }
-    const incomplete = this.variants.findIndex((v) => !v.primaryText || !v.headline);
+    const active = this.shownVariants();
+    const incomplete = active.findIndex((v) => !v.primaryText || !v.headline);
     if (incomplete >= 0) {
       this.activeVariant = incomplete;
       this.error.set(this.numVariants > 1
@@ -213,7 +219,7 @@ export class App implements OnInit {
           video_url: this.videoUrl || null,
           daily_budget_cents: this.budget,
           landing_url: this.landingUrl,
-          variants: this.variants.map((v) => ({
+          variants: active.map((v) => ({
             primary_text: v.primaryText, headline: v.headline, description: v.description,
           })),
           ai_generated: this.aiGenerated,
