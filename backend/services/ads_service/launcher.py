@@ -16,12 +16,14 @@ from backend.services.db_service import ads_db
 logger = get_logger(__name__)
 
 
-def get_founder_platform():
-    """Platform client from env credentials (Phase A: single founder account)."""
+def get_founder_platform(account_id: str = ""):
+    """Platform client from env credentials (Phase A: single founder token).
+    account_id overrides the env ad account — the founder-scoped account
+    picker; the token must have access to it (validated at /launch)."""
     return AdsFactory.get_platform(
         "meta",
         access_token=os.getenv("META_ACCESS_TOKEN", ""),
-        account_id=os.getenv("META_AD_ACCOUNT_ID", ""),
+        account_id=account_id or os.getenv("META_AD_ACCOUNT_ID", ""),
         page_id=os.getenv("META_PAGE_ID"),
     )
 
@@ -43,7 +45,9 @@ def run_launch(launch_id: str) -> Dict[str, Any]:
         config=LaunchConfig(**launch["config"]),
     )
 
-    platform = get_founder_platform()
+    # Launch steps create objects under the account, so the platform must be
+    # bound to the account this launch was created for.
+    platform = get_founder_platform(launch.get("account_id", ""))
     ads_db.update_ad_launch(launch_id, {"status": "launching", "error": None})
     try:
         ids = platform.launch(

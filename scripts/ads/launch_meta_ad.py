@@ -57,12 +57,12 @@ def require_env(*names: str) -> None:
         sys.exit(f"❌ Missing in .env: {', '.join(missing)}")
 
 
-def get_platform(require_account: bool = True):
+def get_platform(require_account: bool = True, account_id: str = ""):
     require_env("META_ACCESS_TOKEN", *(["META_AD_ACCOUNT_ID"] if require_account else []))
     return AdsFactory.get_platform(
         "meta",
         access_token=os.getenv("META_ACCESS_TOKEN"),
-        account_id=os.getenv("META_AD_ACCOUNT_ID", ""),
+        account_id=account_id or os.getenv("META_AD_ACCOUNT_ID", ""),
         page_id=os.getenv("META_PAGE_ID"),
     )
 
@@ -142,7 +142,8 @@ def run_launch(launch_id: str) -> None:
         config=LaunchConfig(**launch["config"]),
     )
 
-    platform = get_platform()
+    # Resume on the account the launch was created for (account picker docs)
+    platform = get_platform(account_id=launch.get("account_id", ""))
     ads_db.update_ad_launch(launch_id, {"status": "launching", "error": None})
     try:
         ids = platform.launch(

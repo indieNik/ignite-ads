@@ -47,6 +47,12 @@ interface Run {
   prompt: string;
 }
 
+interface AdAccount {
+  id: string;
+  name: string;
+  currency: string;
+}
+
 interface Toast {
   id: number;
   kind: 'success' | 'error' | 'info';
@@ -84,17 +90,30 @@ export class App implements OnInit {
   toasts = signal<Toast[]>([]);
   confirmState = signal<ConfirmState | null>(null);
 
-  // launch form
+  // launch wizard: 1 = pick creative, 2 = copy, 3 = budget/account/review
+  launchStep = signal(1);
+  wizardSteps = [
+    { n: 1, label: 'Video' },
+    { n: 2, label: 'Copy' },
+    { n: 3, label: 'Launch' },
+  ];
+  accounts = signal<AdAccount[]>([]);
+  selectedAccount = '';
+  runFilter = '';
   selectedRun = '';
   videoUrl = '';
   landingUrl = 'https://igniteai.in';
   budget = 10000; // minor units (₹100.00 on INR accounts)
+  countries = 'IN';
+  ageMin = 18;
+  ageMax = 65;
   numVariants = 1; // A/B test: one ad per copy variant, same video + adset
   activeVariant = 0;
   // Always 3 slots — the count control only changes how many are shown and
   // submitted. Truncating here would destroy copy when toggling 3 → 2 → 3.
   variants: VariantForm[] = Array.from({ length: 3 }, () => this.emptyVariant());
   aiGenerated = false;
+  private playingVideo: HTMLVideoElement | null = null;
 
   private toastSeq = 0;
 
@@ -137,12 +156,97 @@ export class App implements OnInit {
   async openLaunch() {
     this.showLaunch.set(true);
     this.error.set('');
+    this.launchStep.set(1);
+    this.runFilter = '';
     try {
-      const data = await apiFetch('/api/ads/runs');
-      this.runs.set(data.runs || []);
+      const [runsData, accountsData] = await Promise.all([
+        apiFetch('/api/ads/runs'),
+        apiFetch('/api/ads/accounts').catch(() => null), // non-founder: picker hidden
+      ]);
+      this.runs.set(runsData.runs || []);
+      if (accountsData) {
+        this.accounts.set(accountsData.accounts || []);
+        if (!this.selectedAccount) this.selectedAccount = accountsData.default_id || '';
+      }
     } catch (e: any) {
       this.error.set(e.message);
     }
+  }
+
+  // ---------- wizard navigation ----------
+
+  canNext(): boolean {
+    if (this.launchStep() === 1) return !!this.selectedRun || !!this.videoUrl;
+    if (this.launchStep() === 2) {
+      return this.shownVariants().every((v) => !!v.primaryText && !!v.headline);
+    }
+    return true;
+  }
+
+  next() {
+    this.error.set('');
+    this.stopVideo();
+    this.launchStep.update((s) => Math.min(3, s + 1));
+  }
+
+  back() {
+    this.error.set('');
+    this.launchStep.update((s) => Math.max(1, s - 1));
+  }
+
+  /** Step chips: completed steps are clickable to jump back. */
+  goToStep(n: number) {
+    if (n < this.launchStep()) this.launchStep.set(n);
+  }
+
+  // ---------- step 1: creative picker ----------
+
+  filteredRuns(): Run[] {
+    const q = this.runFilter.trim().toLowerCase();
+    if (!q) return this.runs();
+    return this.runs().filter((r) => (r.prompt || '').toLowerCase().includes(q));
+  }
+
+  selectRun(r: Run) {
+    this.selectedRun = this.selectedRun === r.run_id ? '' : r.run_id;
+    if (this.selectedRun) this.videoUrl = '';
+  }
+
+  onUrlTyped() {
+    if (this.videoUrl) this.selectedRun = '';
+  }
+
+  /** Click the video itself: play with sound (pausing any other preview). */
+  toggleVideo(e: Event) {
+    e.stopPropagation();
+    const el = e.target as HTMLVideoElement;
+    if (el.paused) {
+      if (this.playingVideo && this.playingVideo !== el) this.playingVideo.pause();
+      el.muted = false;
+      el.play();
+      this.playingVideo = el;
+    } else {
+      el.pause();
+    }
+  }
+
+  private stopVideo() {
+    if (this.playingVideo) {
+      this.playingVideo.pause();
+      this.playingVideo = null;
+    }
+  }
+
+  // ---------- step 3: review helpers ----------
+
+  reviewVideoUrl(): string {
+    if (this.videoUrl) return this.videoUrl;
+    return this.runs().find((r) => r.run_id === this.selectedRun)?.video_url || '';
+  }
+
+  accountLabel(): string {
+    const a = this.accounts().find((x) => x.id === this.selectedAccount);
+    return a ? `${a.name} (${a.currency})` : 'default ad account';
   }
 
   emptyVariant(): VariantForm {
@@ -265,6 +369,10 @@ export class App implements OnInit {
           video_url: this.videoUrl || null,
           daily_budget_cents: this.budget,
           landing_url: this.landingUrl,
+          ad_account_id: this.selectedAccount || null,
+          countries: this.countries.split(',').map((c) => c.trim().toUpperCase()).filter(Boolean),
+          age_min: this.ageMin,
+          age_max: this.ageMax,
           variants: active.map((v) => ({
             primary_text: v.primaryText, headline: v.headline, description: v.description,
           })),

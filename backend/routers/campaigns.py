@@ -42,6 +42,9 @@ class LaunchRequest(BaseModel):
     age_min: int = 18
     age_max: int = 65
     name: Optional[str] = None
+    # Founder-scoped account picker: must be one of the accounts the
+    # connected token can access (validated below). None = env default.
+    ad_account_id: Optional[str] = None
     # A/B test: 1-3 copy variants, one ad each. The singular fields below are
     # the pre-variant API shape — still accepted as a one-variant launch.
     variants: Optional[list[CopyVariant]] = Field(default=None, max_length=MAX_COPY_VARIANTS)
@@ -133,6 +136,22 @@ async def get_campaign(launch_id: str, user: dict = Depends(get_current_user)):
     return _own_launch_or_404(launch_id, user["uid"])
 
 
+@router.get("/accounts")
+async def list_accounts(user: dict = Depends(require_launch_access)):
+    """Ad accounts the connected (founder) token can launch on — powers the
+    account picker. Phase B replaces this with per-customer OAuth accounts."""
+    try:
+        who = get_founder_platform().whoami()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Meta token check failed: {e}")
+    return {
+        "accounts": [{"id": a.get("id"), "name": a.get("name", ""),
+                      "currency": a.get("currency", "")}
+                     for a in who.get("ad_accounts", [])],
+        "default_id": os.getenv("META_AD_ACCOUNT_ID", ""),
+    }
+
+
 @router.post("/copy-suggest")
 async def copy_suggest(req: CopySuggestRequest, user: dict = Depends(require_launch_access)):
     video_script = ""
@@ -179,17 +198,28 @@ async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
                                                     "primary_text + headline "
                                                     "(use /copy-suggest first)")
 
-    account = ads_db.upsert_env_ad_account(
-        user["uid"], "meta",
-        account_id=os.getenv("META_AD_ACCOUNT_ID", ""),
-        page_id=os.getenv("META_PAGE_ID"),
-    )
-    if not account.get("currency"):
+    account_id = req.ad_account_id or os.getenv("META_AD_ACCOUNT_ID", "")
+    if req.ad_account_id:
+        # Only accounts the connected token can actually access
         try:
-            info = get_founder_platform().get_account_info()
+            who = get_founder_platform().whoami()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Meta token check failed: {e}")
+        if req.ad_account_id not in {a.get("id") for a in who.get("ad_accounts", [])}:
+            raise HTTPException(status_code=403,
+                                detail="Ad account not accessible to the connected token")
+
+    account = ads_db.upsert_env_ad_account(
+        user["uid"], "meta", account_id=account_id, page_id=os.getenv("META_PAGE_ID"),
+    )
+    # Currency drives the budget unit (INR = paise). The doc is per-user, so a
+    # previously fetched currency may belong to a different account — re-fetch
+    # whenever an explicit account was chosen.
+    if req.ad_account_id or not account.get("currency"):
+        try:
+            info = get_founder_platform(account_id).get_account_info()
             account = ads_db.upsert_env_ad_account(
-                user["uid"], "meta",
-                account_id=os.getenv("META_AD_ACCOUNT_ID", ""),
+                user["uid"], "meta", account_id=account_id,
                 page_id=os.getenv("META_PAGE_ID"),
                 display_name=info.get("name", ""),
                 currency=info.get("currency", ""),

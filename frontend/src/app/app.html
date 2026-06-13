@@ -125,83 +125,150 @@
     }
   </main>
 
-  <!-- ============ launch modal ============ -->
+  <!-- ============ launch wizard ============ -->
   @if (showLaunch()) {
     <div class="overlay" (click)="showLaunch.set(false)">
-      <section class="modal" (click)="$event.stopPropagation()">
+      <section class="modal wizard" (click)="$event.stopPropagation()">
         <h3>New launch</h3>
         <p class="muted small modal-sub">Publishes <b>paused</b> — no spend until you explicitly activate.</p>
 
-        <label>Video (completed IgniteAI run)
-          <select [(ngModel)]="selectedRun">
-            <option value="">— pick a video —</option>
-            @for (r of runs(); track r.run_id) {
-              <option [value]="r.run_id">{{ runLabel(r) }}</option>
-            }
-          </select>
-        </label>
-        <label>…or any public video URL
-          <input [(ngModel)]="videoUrl" placeholder="https://…/video.mp4" />
-        </label>
-        <div class="grid2">
-          <label>Landing URL
-            <input [(ngModel)]="landingUrl" />
-          </label>
-          <label>Daily budget <span class="hint">(minor units — 10000 = ₹100)</span>
-            <input type="number" [(ngModel)]="budget" />
-          </label>
+        <div class="wsteps" aria-label="Launch steps">
+          @for (s of wizardSteps; track s.n) {
+            <button class="wstep" [class.on]="launchStep() === s.n" [class.done]="launchStep() > s.n"
+                    [disabled]="s.n > launchStep() || launching()" (click)="goToStep(s.n)">
+              <span class="wstep-n">@if (launchStep() > s.n) {✓} @else {{{ s.n }}}</span>{{ s.label }}
+            </button>
+          }
         </div>
 
-        <div class="copy-head">
-          <h4>Ad copy</h4>
-          <div class="copy-tools">
-            <div class="seg" role="group" aria-label="Number of A/B variants">
-              <span class="seg-label">Variants</span>
-              @for (n of [1, 2, 3]; track n) {
-                <button class="seg-btn" [class.on]="numVariants === n" [disabled]="suggesting() || launching()"
-                        (click)="setNumVariants(n)">{{ n }}</button>
+        @switch (launchStep()) {
+          <!-- ---- step 1: pick the creative ---- -->
+          @case (1) {
+            <input class="wsearch" [(ngModel)]="runFilter" placeholder="Search your videos…" />
+            <div class="vid-grid">
+              @for (r of filteredRuns(); track r.run_id) {
+                <div class="vid-card" [class.sel]="selectedRun === r.run_id" (click)="selectRun(r)">
+                  <video [src]="r.video_url" muted playsinline preload="metadata"
+                         (click)="toggleVideo($event)"></video>
+                  <div class="vid-meta">
+                    <b>{{ fmtDate(r.created_at) }}</b>
+                    <span>{{ (r.prompt || r.run_id).slice(0, 44) }}</span>
+                  </div>
+                  @if (selectedRun === r.run_id) { <span class="vid-check">✓</span> }
+                </div>
+              } @empty {
+                <p class="muted small vid-empty">No completed videos@if (runFilter) { matching “{{ runFilter }}”}.</p>
               }
             </div>
-            <button class="gemini" [class.thinking]="suggesting()" [disabled]="suggesting()" (click)="suggestCopy()">
-              @if (suggesting()) {
-                <span class="orbit sm"></span> Gemini is writing…
-              } @else {
-                ✨ Suggest with Gemini
-              }
-            </button>
-          </div>
-        </div>
-        @if (numVariants > 1) {
-          <div class="vtabs" role="tablist">
-            @for (v of shownVariants(); track $index) {
-              <button class="vtab" role="tab" [class.on]="activeVariant === $index"
-                      (click)="activeVariant = $index">
-                v{{ $index + 1 }}@if (v.headline) {<span class="vtab-hint"> · {{ v.headline.slice(0, 18) }}</span>}
-              </button>
+            <p class="hint small">Click a video to play it with sound — click the card border to select.</p>
+            <label>…or any public video URL
+              <input [(ngModel)]="videoUrl" placeholder="https://…/video.mp4" (input)="onUrlTyped()" />
+            </label>
+          }
+
+          <!-- ---- step 2: ad copy ---- -->
+          @case (2) {
+            <div class="copy-head">
+              <h4>Ad copy</h4>
+              <div class="copy-tools">
+                <div class="seg" role="group" aria-label="Number of A/B variants">
+                  <span class="seg-label">Variants</span>
+                  @for (n of [1, 2, 3]; track n) {
+                    <button class="seg-btn" [class.on]="numVariants === n" [disabled]="suggesting() || launching()"
+                            (click)="setNumVariants(n)">{{ n }}</button>
+                  }
+                </div>
+                <button class="gemini" [class.thinking]="suggesting()" [disabled]="suggesting() || regenerating()" (click)="suggestCopy()">
+                  @if (suggesting()) {
+                    <span class="orbit sm"></span> Gemini is writing…
+                  } @else {
+                    ✨ Suggest with Gemini
+                  }
+                </button>
+              </div>
+            </div>
+            @if (numVariants > 1) {
+              <div class="vtabs" role="tablist">
+                @for (v of shownVariants(); track $index) {
+                  <button class="vtab" role="tab" [class.on]="activeVariant === $index"
+                          (click)="activeVariant = $index">
+                    v{{ $index + 1 }}@if (v.headline) {<span class="vtab-hint"> · {{ v.headline.slice(0, 18) }}</span>}
+                  </button>
+                }
+                <button class="link vregen" (click)="regenerateVariant(activeVariant)"
+                        [disabled]="suggesting() || regenerating() || launching()"
+                        title="Rewrite only this variant — the others stay">
+                  @if (regenerating()) { <span class="orbit sm"></span> rewriting v{{ activeVariant + 1 }}… }
+                  @else { ↻ regenerate v{{ activeVariant + 1 }} }
+                </button>
+              </div>
+              <p class="hint small variant-note">One ad per variant — same video, different copy.</p>
             }
-            <button class="link vregen" (click)="regenerateVariant(activeVariant)"
-                    [disabled]="suggesting() || regenerating() || launching()"
-                    title="Rewrite only this variant — the others stay">
-              @if (regenerating()) { <span class="orbit sm"></span> rewriting v{{ activeVariant + 1 }}… }
-              @else { ↻ regenerate v{{ activeVariant + 1 }} }
-            </button>
-          </div>
-          <p class="hint small variant-note">One ad per variant — same video, different copy. For a fair test, budget ≈ ₹100 × variants.</p>
+            <label>Primary text
+              <textarea rows="2" [(ngModel)]="variants[activeVariant].primaryText" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()"></textarea>
+            </label>
+            <div class="grid2">
+              <label>Headline <input [(ngModel)]="variants[activeVariant].headline" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()" /></label>
+              <label>Description <input [(ngModel)]="variants[activeVariant].description" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()" /></label>
+            </div>
+          }
+
+          <!-- ---- step 3: budget, account, review ---- -->
+          @case (3) {
+            <div class="grid2">
+              <label>Landing URL
+                <input [(ngModel)]="landingUrl" />
+              </label>
+              <label>Ad account
+                <select [(ngModel)]="selectedAccount">
+                  @for (a of accounts(); track a.id) {
+                    <option [value]="a.id">{{ a.name }} ({{ a.currency }})</option>
+                  }
+                </select>
+              </label>
+            </div>
+            <div class="grid2">
+              <label>Daily budget <span class="hint">(minor units — 10000 = ₹100)</span>
+                <input type="number" [(ngModel)]="budget" />
+              </label>
+              <label>Countries <span class="hint">(comma-separated ISO)</span>
+                <input [(ngModel)]="countries" />
+              </label>
+            </div>
+            <div class="grid2">
+              <label>Age min <input type="number" [(ngModel)]="ageMin" min="13" max="65" /></label>
+              <label>Age max <input type="number" [(ngModel)]="ageMax" min="13" max="65" /></label>
+            </div>
+
+            <div class="review">
+              <video [src]="reviewVideoUrl()" muted playsinline preload="metadata"></video>
+              <div class="review-info">
+                <b>{{ shownVariants().length }} ad{{ shownVariants().length > 1 ? 's' : '' }} · paused at launch</b>
+                @for (v of shownVariants(); track $index) {
+                  <span class="review-line"><span class="v-tag">v{{ $index + 1 }}</span> {{ v.headline }}</span>
+                }
+                <span class="muted small">→ {{ landingUrl }} · {{ accountLabel() }}</span>
+              </div>
+            </div>
+            @if (numVariants > 1) {
+              <p class="hint small">For a fair A/B test, budget ≈ ₹100 × variants — Meta splits one budget across all {{ numVariants }} ads.</p>
+            }
+          }
         }
-        <label>Primary text
-          <textarea rows="2" [(ngModel)]="variants[activeVariant].primaryText" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()"></textarea>
-        </label>
-        <div class="grid2">
-          <label>Headline <input [(ngModel)]="variants[activeVariant].headline" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()" /></label>
-          <label>Description <input [(ngModel)]="variants[activeVariant].description" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()" /></label>
-        </div>
 
         @if (error()) { <div class="alert">{{ error() }}</div> }
         <div class="actions">
+          @if (launchStep() > 1) {
+            <button class="ghost" (click)="back()" [disabled]="launching()">← Back</button>
+          }
           <button class="ghost" (click)="showLaunch.set(false)" [disabled]="launching()">Cancel</button>
-          <button class="primary" (click)="launch()" [disabled]="launching() || suggesting() || regenerating()">
-            @if (launching()) { <span class="orbit sm light"></span> Launching… } @else { 🚀 Launch (paused) }
-          </button>
+          @if (launchStep() < 3) {
+            <button class="primary" (click)="next()" [disabled]="!canNext() || suggesting() || regenerating()">Next →</button>
+          } @else {
+            <button class="primary" (click)="launch()" [disabled]="launching() || suggesting() || regenerating()">
+              @if (launching()) { <span class="orbit sm light"></span> Launching… } @else { 🚀 Launch (paused) }
+            </button>
+          }
         </div>
       </section>
     </div>
