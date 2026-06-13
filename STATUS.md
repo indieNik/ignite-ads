@@ -3,7 +3,15 @@
 > **Agents: read this first, update it last.** Keep entries terse; newest phase state at top.
 > Full plan: `docs/PLAN.md`. Operating rules: `CLAUDE.md`.
 
-## Current state (2026-06-13) — A/B COPY VARIANTS + AUTOMATED METRICS LOOP
+## Current state (2026-06-13, later) — LAUNCH WIZARD + ACCOUNT PICKER + UX fixes
+
+- **3-step launch wizard** (PR #18): step 1 searchable video-preview grid (click-to-play with sound; fixes "five runs share one name"), step 2 copy/variants, step 3 budget + countries/age targeting (UI finally exposes them) + review card. Replaces the single scrolling modal.
+- **Founder-scoped ad-account picker** (PR #18): `GET /api/ads/accounts` (token whoami), `/launch` validates `ad_account_id` against the token's accounts + re-fetches currency per account; `account_id` stored on launch docs; launcher AND CLI resume bind the platform to the doc's account. Customer OAuth stays Phase B.
+- **Founder-feedback fixes** (PR #17): Gemini suggest/regenerate gated on a selected video (empty script = generic copy); NEW per-variant "↻ regenerate vN" (passes kept headlines as avoid-list); Ads Manager links were missing `act=` and opened the DEFAULT account — docs store account_id, `/campaigns` backfills from env.
+- **Variant-truncation fix** (PR #16): count toggle 3→2→3 no longer wipes copy — form keeps 3 slots, slices at show/submit.
+- Deploy gotcha: backgrounding deploy scripts with raw `&` inside a Bash call kills gcloud mid-orchestration (though the server-side build may still finish and deploy — check `gcloud run revisions list` before assuming failure/conflict).
+
+## Earlier (2026-06-13) — A/B COPY VARIANTS + AUTOMATED METRICS LOOP
 
 - **A/B variants shipped + deployed** (PR #14): one video → up to 3 ads with different Gemini copy in ONE adset/budget. `platform_ids` uses indexed keys (`creative_id_0..2`/`ad_id_0..2`); singular `ad_id`/`creative_id` are legacy aliases = variant 0; ALL read paths go through `get_ad_entries()`/`get_copy_variants()` (base.py) — no migration. Gemini returns N distinct angles in one call; UI has variant tabs + per-variant CTR rows with Top badge.
 - **Idempotency kill-test PASSED** (verification-ladder step 5 ✅): 3-variant launch `adl_0b2bca6c8d4a48eca2b4f356387aefdf` killed after ad v1, `--resume` skipped all 6 done steps, created only missing 3 objects. All 3 ads approved+PAUSED on act_719968544441517 (campaign 120248930842100548) — founder can eyeball/delete.
