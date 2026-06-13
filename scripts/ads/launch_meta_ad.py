@@ -291,6 +291,7 @@ def main():
     created = ads_db.create_ad_launch(launch_id, args.user_id, {
         "platform": "meta",
         "ad_account_doc_id": account["doc_id"],
+        "account_id": account.get("account_id", ""),
         "source_run_id": args.run_id,
         "video_url": video_url,
         "name": name,
