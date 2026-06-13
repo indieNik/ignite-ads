@@ -20,6 +20,7 @@ interface Campaign {
   status: string;
   review_status?: string;
   video_url: string;
+  account_id?: string;
   config: any;
   copy: any;
   copy_variants?: any[];
@@ -77,6 +78,7 @@ export class App implements OnInit {
   error = signal<string>(''); // modal-scoped error
   showLaunch = signal(false);
   suggesting = signal(false);
+  regenerating = signal(false); // single-variant regeneration in flight
   launching = signal(false);
   syncingId = signal<string>(''); // per-card sync spinner
   toasts = signal<Toast[]>([]);
@@ -158,6 +160,12 @@ export class App implements OnInit {
   }
 
   async suggestCopy() {
+    // Copy is written from the video's script — without a creative Gemini
+    // can only produce generic filler.
+    if (!this.selectedRun && !this.videoUrl) {
+      this.error.set('Pick a video first — Gemini writes the copy from it');
+      return;
+    }
     this.suggesting.set(true);
     this.error.set('');
     for (let i = 0; i < this.numVariants; i++) this.variants[i] = this.emptyVariant();
@@ -184,6 +192,44 @@ export class App implements OnInit {
       this.error.set(e.message);
     } finally {
       this.suggesting.set(false);
+    }
+  }
+
+  /** Regenerate ONE variant, keeping the others — steered away from the
+   * angles already on the table so it doesn't duplicate a kept variant. */
+  async regenerateVariant(i: number) {
+    if (!this.selectedRun && !this.videoUrl) {
+      this.error.set('Pick a video first — Gemini writes the copy from it');
+      return;
+    }
+    this.regenerating.set(true);
+    this.error.set('');
+    this.activeVariant = i;
+    const keptHeadlines = this.shownVariants()
+      .filter((v, idx) => idx !== i && v.headline)
+      .map((v) => v.headline);
+    this.variants[i] = this.emptyVariant();
+    try {
+      const res = await apiFetch('/api/ads/copy-suggest', {
+        method: 'POST',
+        body: JSON.stringify({
+          run_id: this.selectedRun || null,
+          landing_url: this.landingUrl,
+          num_variants: 1,
+          product_hint: keptHeadlines.length
+            ? `Take a clearly different angle from these existing variants: ${keptHeadlines.join(' | ')}`
+            : '',
+        }),
+      });
+      const v = (res.variants || [res])[0];
+      await this.typewrite(i, 'primaryText', v.primary_text);
+      await this.typewrite(i, 'headline', v.headline);
+      await this.typewrite(i, 'description', v.description);
+      this.aiGenerated = true;
+    } catch (e: any) {
+      this.error.set(e.message);
+    } finally {
+      this.regenerating.set(false);
     }
   }
 
@@ -302,7 +348,11 @@ export class App implements OnInit {
   // ---------- view helpers ----------
 
   adsManagerUrl(c: Campaign): string {
-    return `https://adsmanager.facebook.com/adsmanager/manage/campaigns?selected_campaign_ids=${c.platform_ids?.campaign_id}`;
+    // Without act= Meta opens the user's DEFAULT ad account, not the one
+    // the campaign lives in.
+    const act = (c.account_id || '').replace('act_', '');
+    const actParam = act ? `act=${act}&` : '';
+    return `https://adsmanager.facebook.com/adsmanager/manage/campaigns?${actParam}selected_campaign_ids=${c.platform_ids?.campaign_id}`;
   }
 
   statusClass(s: string): string {

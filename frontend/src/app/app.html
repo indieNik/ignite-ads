@@ -179,21 +179,27 @@
                 v{{ $index + 1 }}@if (v.headline) {<span class="vtab-hint"> · {{ v.headline.slice(0, 18) }}</span>}
               </button>
             }
+            <button class="link vregen" (click)="regenerateVariant(activeVariant)"
+                    [disabled]="suggesting() || regenerating() || launching()"
+                    title="Rewrite only this variant — the others stay">
+              @if (regenerating()) { <span class="orbit sm"></span> rewriting v{{ activeVariant + 1 }}… }
+              @else { ↻ regenerate v{{ activeVariant + 1 }} }
+            </button>
           </div>
           <p class="hint small variant-note">One ad per variant — same video, different copy. For a fair test, budget ≈ ₹100 × variants.</p>
         }
         <label>Primary text
-          <textarea rows="2" [(ngModel)]="variants[activeVariant].primaryText" [class.shimmer]="suggesting()" [disabled]="suggesting()"></textarea>
+          <textarea rows="2" [(ngModel)]="variants[activeVariant].primaryText" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()"></textarea>
         </label>
         <div class="grid2">
-          <label>Headline <input [(ngModel)]="variants[activeVariant].headline" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
-          <label>Description <input [(ngModel)]="variants[activeVariant].description" [class.shimmer]="suggesting()" [disabled]="suggesting()" /></label>
+          <label>Headline <input [(ngModel)]="variants[activeVariant].headline" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()" /></label>
+          <label>Description <input [(ngModel)]="variants[activeVariant].description" [class.shimmer]="suggesting() || regenerating()" [disabled]="suggesting() || regenerating()" /></label>
         </div>
 
         @if (error()) { <div class="alert">{{ error() }}</div> }
         <div class="actions">
           <button class="ghost" (click)="showLaunch.set(false)" [disabled]="launching()">Cancel</button>
-          <button class="primary" (click)="launch()" [disabled]="launching() || suggesting()">
+          <button class="primary" (click)="launch()" [disabled]="launching() || suggesting() || regenerating()">
             @if (launching()) { <span class="orbit sm light"></span> Launching… } @else { 🚀 Launch (paused) }
           </button>
         </div>

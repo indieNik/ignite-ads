@@ -119,7 +119,13 @@ async def list_completed_runs(user: dict = Depends(get_current_user)):
 
 @router.get("/campaigns")
 async def list_campaigns(user: dict = Depends(get_current_user)):
-    return {"campaigns": ads_db.list_ad_launches(user_id=user["uid"])}
+    campaigns = ads_db.list_ad_launches(user_id=user["uid"])
+    # Ads Manager deep links need the account id; docs from before it was
+    # stored get the env account (Phase A: everything launches on it).
+    default_account = os.getenv("META_AD_ACCOUNT_ID", "")
+    for c in campaigns:
+        c.setdefault("account_id", default_account)
+    return {"campaigns": campaigns}
 
 
 @router.get("/campaigns/{launch_id}")
@@ -205,6 +211,7 @@ async def launch(req: LaunchRequest, background_tasks: BackgroundTasks,
     ads_db.create_ad_launch(launch_id, user["uid"], {
         "platform": "meta",
         "ad_account_doc_id": account["doc_id"],
+        "account_id": account.get("account_id", ""),
         "source_run_id": req.run_id,
         "video_url": video_url,
         "name": req.name or f"{copy_variants[0]['headline']} — IgniteAds",

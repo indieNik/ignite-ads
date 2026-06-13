@@ -204,6 +204,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 }
 .vtab.on { border-color: var(--brand); color: var(--text); background: rgba(109, 74, 255, 0.12); }
 .vtab-hint { color: var(--dimmer); font-weight: 400; }
+.vregen { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.vregen:disabled { opacity: 0.6; cursor: progress; }
 .variant-note { color: var(--dimmer); margin: -2px 0 10px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
